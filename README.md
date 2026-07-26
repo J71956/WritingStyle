@@ -36,15 +36,19 @@ pytest -m slow         # spaCy + full pipeline on the real corpus
 
 ## Key data finding — EE.pdf
 
-The Extended Essay's **prose is not in its PDF text layer**: only a large numeric
-data appendix is extractable (≈64.8k numeric "words", 8 lines with any letters).
-The essay body is image-based and would require OCR to recover. Consequences:
+`EE.pdf` is **entirely a numeric data appendix** — 395 pages of simulation
+data tables, with **no prose anywhere in the file** (verified: 0 pages contain
+more than 15 alphabetic words; no embedded images; page renders show only
+numeric columns). Its ≈64.8k extractable "words" are decimal data values.
 
-- The spec's premise that `EE.pdf` dominates the *style* signal does not hold —
-  once numeric data-table lines are dropped (`ingest.drop_nonprose_lines`), EE
-  contributes ~21 words and is excluded by `analyzer.min_doc_tokens`.
-- The style profile is therefore built from the **16 real-prose documents**.
-- To include EE's actual writing, add an OCR pass (deferred; Tesseract).
+- The essay's actual prose (introduction, methodology, analysis, conclusion) is
+  **not in this PDF** — it is a separate document not present in `Dataset/`.
+  OCR cannot recover prose that the file does not contain.
+- The spec's premise that `EE.pdf` dominates the *style* signal therefore does
+  not hold. Numeric data-table lines are dropped (`ingest.drop_nonprose_lines`),
+  leaving ~21 tokens, so EE is excluded by `analyzer.min_doc_tokens`.
+- The style profile is built from the **16 real-prose documents**. To include
+  the Extended Essay's writing, add the real essay document to `Dataset/`.
 
 ## Layout
 

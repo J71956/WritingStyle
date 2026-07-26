@@ -146,16 +146,19 @@ class IngestResult:
 
 
 def _extraction_warning(doc_id: str, text: str, file_bytes: int) -> str | None:
-    """Flag likely-scanned/image PDFs (low text yield for a large file)."""
+    """Flag documents with little usable prose (data appendix or scanned PDF).
+
+    Confirmed case: EE.pdf is a 395-page numeric data appendix — its text layer
+    holds ~65k numeric tokens but essentially no prose (verified: 0 pages with
+    >15 alphabetic words). Its essay prose is not present in the file at all, so
+    OCR cannot recover it. The prose-yield check below flags this reliably.
+    """
     words = count_tokens(text)
     if not text:
-        return f"{doc_id}: extracted no text (likely a scanned/image PDF)"
-    alpha = sum(c.isalpha() for c in text)
-    alpha_ratio = alpha / max(len(text), 1)
+        return f"{doc_id}: extracted no text (data appendix or scanned PDF)"
     if file_bytes > 1_000_000 and words < 500:
-        return f"{doc_id}: {words} words from {file_bytes // 1024} KB file — possible scanned PDF / low text yield"
-    if alpha_ratio < 0.5:
-        return f"{doc_id}: low alphabetic ratio ({alpha_ratio:.2f}) — extraction may be garbled"
+        return (f"{doc_id}: only {words} prose words from a {file_bytes // 1024} KB file — "
+                "appears to be a data appendix (or scanned); no prose to analyze")
     return None
 
 
