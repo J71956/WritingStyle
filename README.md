@@ -98,9 +98,13 @@ stylellm generate "a cover letter for a data analyst internship" --doc-type cove
 stylellm ab "a short personal statement about engineering" --doc-type personal_statement
 ```
 
-Generation defaults to a local **Ollama** instruct model (`config/default.yaml`
-→ `generate.model`; pull it with `ollama pull …` and run `ollama serve`). For an
-offline dry-run of the orchestration without a model, pass `--backend fake`.
+Generation defaults to a local **Ollama** instruct model — `qwen3.5:9b`
+(`config/default.yaml` → `generate.model`; pull it with `ollama pull qwen3.5:9b`
+and run `ollama serve`). qwen3.5 is a hybrid reasoning model, so `generate.think`
+defaults to `false` — otherwise the chain-of-thought consumes `num_predict` and
+the answer comes back empty; set it to `null` for non-reasoning models like
+`llama3.1`. For an offline dry-run of the orchestration without a model, pass
+`--backend fake`.
 
 All derived outputs land under `artifacts/` (git-ignored). Configuration —
 random seed, document-type map, cleaning thresholds, embedding model, chunking,
