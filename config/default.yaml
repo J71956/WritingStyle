@@ -62,11 +62,15 @@ retrieve:
 generate:
   # Local instruct model via Ollama (R5.1). Use "fake" for offline/CI runs.
   backend: ollama
-  # Placeholder — verify a current local instruct model before use (spec §8).
-  model: llama3.1:8b-instruct-q4_K_M
+  # Local instruct model pulled into Ollama (spec §8). Verified present via `ollama list`.
+  model: qwen3.5:9b
   ollama_host: http://localhost:11434
   max_tokens: 512
   temperature: 0.7
+  # Disable reasoning for hybrid models (qwen3.5) so num_predict is spent on the
+  # answer, not chain-of-thought (which lands in a separate `thinking` field and
+  # leaves `response` empty). Set to null for non-reasoning models like llama3.1.
+  think: false
 
 evaluate:
   # A/B + stylometric-similarity trials appended here (under artifacts/).

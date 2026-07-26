@@ -117,19 +117,23 @@ class Backend(Protocol):
 class OllamaBackend:
     """Local Ollama HTTP backend (R5.1) using the standard library only."""
 
-    def __init__(self, host: str, model: str):
+    def __init__(self, host: str, model: str, think: bool | None = None):
         self.host = host.rstrip("/")
         self.model = model
+        self.think = think
 
     def complete(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        payload = json.dumps(
-            {
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": temperature, "num_predict": max_tokens},
-            }
-        ).encode("utf-8")
+        body = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+        # Only send `think` for models that support it; omit for the rest so
+        # non-reasoning models (llama3.1) don't reject the request.
+        if self.think is not None:
+            body["think"] = self.think
+        payload = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             f"{self.host}/api/generate",
             data=payload,
@@ -164,7 +168,9 @@ def make_backend(settings: Settings) -> Backend:
     if backend == "fake":
         return FakeBackend()
     if backend == "ollama":
-        return OllamaBackend(settings.generate.ollama_host, settings.generate.model)
+        return OllamaBackend(
+            settings.generate.ollama_host, settings.generate.model, settings.generate.think
+        )
     raise ValueError(f"Unknown generation backend: {settings.generate.backend!r}")
 
 

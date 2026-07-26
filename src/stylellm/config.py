@@ -70,11 +70,16 @@ class GenerateCfg(BaseModel):
     # Local instruct model via Ollama by default (R5.1). "fake" is an offline,
     # deterministic backend for tests / when no local model is installed.
     backend: str = "ollama"  # ollama | fake
-    # Placeholder — verify a current local instruct model before use (spec §8).
-    model: str = "llama3.1:8b-instruct-q4_K_M"
+    # Local instruct model pulled into Ollama (spec §8); overridable via config.
+    model: str = "qwen3.5:9b"
     ollama_host: str = "http://localhost:11434"
     max_tokens: int = 512
     temperature: float = 0.7
+    # Reasoning ("thinking") control for hybrid models like qwen3.5. When the
+    # model reasons, its chain-of-thought fills num_predict and the `response`
+    # field comes back empty, so we disable it by default. Set to null/None for
+    # non-reasoning models (e.g. llama3.1) that reject the `think` parameter.
+    think: bool | None = False
 
 
 class EvalCfg(BaseModel):
