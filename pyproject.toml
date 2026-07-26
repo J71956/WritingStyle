@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stylellm"
+version = "0.1.0"
+description = "Personal Style LLM — local, single-user writing-style analysis (v1: ingest + style profile)"
+readme = "personal-style-llm-spec.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pymupdf>=1.24",
+    "pdfplumber>=0.11",
+    "spacy>=3.7",
+    "textstat>=0.7",
+    "langdetect>=1.0.9",
+    "sentence-transformers>=2.7",
+    "scikit-learn>=1.4",
+    "numpy>=1.26",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+stylellm = "stylellm.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: end-to-end tests that run on the real Dataset/ corpus",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

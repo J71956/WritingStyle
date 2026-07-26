@@ -1,0 +1,23 @@
+# Derived artifacts — everything the pipeline produces stays local (R7.2, R7.3)
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Envs / editors
+.venv/
+venv/
+.vscode/
+.idea/
+
+# spaCy / model caches occasionally dropped in-tree
+*.spacy

@@ -1,0 +1,61 @@
+# Personal Style LLM — single config-as-code file (R7.1)
+# Reproducibility: fixed seed, curated doc_type map, explicit thresholds.
+
+seed: 42
+
+paths:
+  dataset_dir: Dataset
+  artifacts_dir: artifacts
+
+ingest:
+  # A single document exceeding this share of total corpus tokens is flagged
+  # is_dominant (R1.3). EE.pdf (~69%) trips this.
+  dominance_threshold: 0.40
+  # A line repeated on at least this many pages is treated as a running
+  # header/footer and stripped (P1).
+  header_footer_min_pages: 3
+  # Soft, logged PII redaction of obvious emails/phones (R1.4) — never a gate.
+  redact_pii: true
+  # Drop lines with no alphabetic content (numeric data tables, stray symbols).
+  # Data tables carry no authorial *style* and are extraction noise for a style
+  # corpus (R1.1). Chiefly removes the Extended Essay's huge numeric appendix.
+  drop_nonprose_lines: true
+  # Regex (case-insensitive) marking the start of the EE reference/bibliography
+  # section, everything from the first match to EOF is dropped (P1).
+  reference_heading_pattern: '^\s*(works cited|bibliography|references|reference list)\s*$'
+
+analyzer:
+  # equal_weight_by_type: features computed per doc_type, then averaged across
+  # types so the dominant EE cannot swamp the corpus profile (R2.2, P3).
+  skew_mode: equal_weight_by_type
+  # Exclude docs below this many tokens from analysis (unreliable features).
+  # EE.pdf falls here: its essay prose is image-based, not in the text layer.
+  min_doc_tokens: 50
+  top_ngrams: 20
+  # KMeans topic clusters for the semantic dimension.
+  topic_clusters: 6
+  # sentence-transformers model for the style-embedding centroid (verify §8).
+  embedding_model: sentence-transformers/all-mpnet-base-v2
+  profile_version: "1.0"
+
+# Curated filename -> doc_type map (17 files). Keys match Dataset/ filenames
+# exactly. doc_type in: personal_statement | cover_letter | academic_ia |
+# assignment | reflection | extended_essay
+doc_type_map:
+  "CUHK_Personal_Statement.pdf": personal_statement
+  "HKU Personal Statement.pdf": personal_statement
+  "Siu Yau Shing HKU Application.pdf": personal_statement
+  "Siu Yau Shing HKUST Application.pdf": personal_statement
+  "Siu Yau Shing PolyU Application.pdf": personal_statement
+  "Cover Letter.pdf": cover_letter
+  "HKSTP Cover Letter.pdf": cover_letter
+  "kcv157_CHEM_IA.pdf": academic_ia
+  "kcv157_MATH_IA.pdf": academic_ia
+  "kcv157-Physics IA.pdf": academic_ia
+  "Siu_Yau_Shing GEOG IA.pdf": academic_ia
+  "Buisness Finance Individual Assignment Siu Yau Shing 23115372d.pdf": assignment
+  "ME1D01 Siu Yau Shing 23115372D.pdf": assignment
+  "23115372d_SiuYauShing_S4_LearningJournal.docx.pdf": reflection
+  "IE Reflection .pdf": reflection
+  "Review of AI Ethics Interview with Reid Blackman.pdf": reflection
+  "EE.pdf": extended_essay
