@@ -1,14 +1,18 @@
-"""Hypothesis property tests: P2 (dominance), P3 (skew invariance), P4 (round-trip)."""
+"""Hypothesis property tests: P2 (dominance), P3 (skew invariance), P4 (round-trip),
+P5 (chunk cap), P8 (retrieval bound & diversity)."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from hypothesis import given
+import numpy as np
+from hypothesis import given, settings as hyp_settings
 from hypothesis import strategies as st
 
+from stylellm.config import Settings
+from stylellm.index import StyleIndex, chunk_document
 from stylellm.ingest import flag_dominant
-from stylellm.models import Document, StyleProfile
+from stylellm.models import Chunk, Document, StyleProfile, content_hash
 from stylellm.style_analyzer import _mean_dicts
 
 DOC_TYPES = ["personal_statement", "cover_letter", "academic_ia", "assignment", "reflection"]
@@ -90,3 +94,75 @@ def test_p4_profile_json_round_trip(lex, syn, prag):
         assert restored.lexical[key] == val
     # all four dimensions present per type
     assert set(restored.per_type["cover_letter"]) == {"lexical", "syntactic", "semantic", "pragmatic"}
+
+
+# --- P5: chunk invariants (token cap) --------------------------------------
+
+
+@hyp_settings(max_examples=50)
+@given(
+    n_sents=st.integers(min_value=1, max_value=60),
+    words_per_sent=st.integers(min_value=1, max_value=40),
+    max_tokens=st.integers(min_value=32, max_value=512),
+)
+def test_p5_every_chunk_within_token_cap(n_sents, words_per_sent, max_tokens):
+    # A single big paragraph of many sentences must be split so no chunk exceeds
+    # the hard max (a lone sentence longer than max is the only allowed overflow).
+    text = ". ".join(" ".join(["w"] * words_per_sent) for _ in range(n_sents)) + "."
+    doc = Document(doc_id="d.pdf", doc_type="assignment", text=text, token_count=n_sents * words_per_sent)
+    chunks = chunk_document(doc, target_tokens=max_tokens // 2, max_tokens=max_tokens)
+    assert chunks
+    for i, c in enumerate(chunks):
+        assert c.chunk_index == i
+        assert c.content_hash
+        # Overflow only permitted when a single sentence alone exceeds the cap.
+        assert c.token_count <= max_tokens or words_per_sent > max_tokens
+
+
+# --- P8: retrieval bound & diversity ---------------------------------------
+
+
+def _unit(vec):
+    v = np.asarray(vec, dtype=np.float32)
+    return v / (np.linalg.norm(v) + 1e-12)
+
+
+@hyp_settings(max_examples=40, deadline=None)
+@given(
+    n=st.integers(min_value=1, max_value=25),
+    k=st.integers(min_value=1, max_value=8),
+    seed=st.integers(min_value=0, max_value=10_000),
+)
+def test_p8_retrieval_bounded_and_deduped(n, k, seed):
+    from stylellm import retrieve as retrieve_mod
+
+    rng = np.random.default_rng(seed)
+    vecs = _l2(rng.normal(size=(n, 8)))
+    chunks = [
+        Chunk(chunk_id=f"c{i}", doc_id=f"c{i}.pdf", doc_type="assignment", chunk_index=0,
+              token_count=10, text=f"t{i}", content_hash=content_hash(f"t{i}-{i}"))
+        for i in range(n)
+    ]
+    index = StyleIndex(chunks=chunks, embeddings=vecs)
+    q = _unit(rng.normal(size=8))
+
+    orig = retrieve_mod.embed_texts
+    retrieve_mod.embed_texts = lambda texts, model: np.stack([q])
+    try:
+        out = retrieve_mod.retrieve("q", index, Settings(), k=k)
+    finally:
+        retrieve_mod.embed_texts = orig
+
+    assert len(out) <= k  # P8: bounded by k
+    # No two returned chunks are near-duplicates above the dedupe threshold.
+    thr = Settings().retrieve.dedupe_threshold
+    ids = [r.chunk.chunk_id for r in out]
+    pos = {c.chunk_id: i for i, c in enumerate(chunks)}
+    for a in range(len(ids)):
+        for b in range(a + 1, len(ids)):
+            cos = float(np.dot(vecs[pos[ids[a]]], vecs[pos[ids[b]]]))
+            assert cos < thr
+
+
+def _l2(m):
+    return m / (np.linalg.norm(m, axis=1, keepdims=True) + 1e-12)

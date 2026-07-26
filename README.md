@@ -10,22 +10,38 @@ services. Everything runs from a single CLI against local files.
 
 ## Status
 
-This repository implements **v1, phase A** — the project's primary deliverable:
+This repository implements the full **v1** pipeline — analysis and generation:
 
 - **Ingestion (R1):** PDF → clean UTF-8 text, per-document-type tagging, corpus
   reporting.
 - **Style analysis (R2):** lexical / syntactic / semantic / pragmatic features
   computed per document type and aggregated into a skew-aware corpus profile.
+- **Chunk & index (R3):** paragraph-based chunking (≤512 tokens), local
+  in-memory embedding index, idempotent rebuild.
+- **Retrieval (R4):** dense cosine exemplar search with `doc_type` filtering and
+  MMR diversity.
+- **Generation (R5):** prompt-based drafting in the author's voice via a local
+  instruct model (Ollama), combining the style profile with retrieved exemplars.
+- **Evaluation (R6):** stylometric similarity + a blind A/B harness, logged
+  locally.
 
-The generation half — local-model drafting in the author's voice, exemplar
-retrieval, and blind A/B evaluation — is specified in `personal-style-llm-spec.md`
-and is the planned next phase.
+Fine-tuning, hybrid retrieval, and a served endpoint remain deferred to v2 and
+gated on v1 evidence (see `personal-style-llm-spec.md` §12).
 
 ## How it works
 
 ```
 PDFs ──► Ingest ──► Cleaned corpus ──► Style Analyzer ──► StyleProfile (JSON)
          (R1)       + ingestion report   (R2)              + style report (Markdown)
+                          │
+                          ├──► Chunk + Embed ──► Local index (R3)
+                          │                          │
+                          │              Dense retrieval + MMR (R4)
+                          │                          │
+                          └──► Prompt Orchestrator ──┴──► Local model ──► Draft (R5)
+                                     (profile summary + exemplars)          │
+                                                              Stylometric similarity
+                                                              + blind A/B (R6)
 ```
 
 **Ingestion** extracts text with PyMuPDF, strips boilerplate (running
@@ -69,11 +85,26 @@ filename to a document type in `config/default.yaml`, then:
 ```powershell
 stylellm ingest     # -> artifacts/corpus/ + artifacts/ingestion_report.md
 stylellm analyze    # -> artifacts/style_profile.json + artifacts/style_report.md
+stylellm index      # -> artifacts/index/ (chunks.jsonl + embeddings.npy)
 ```
 
+Then generate and evaluate:
+
+```powershell
+# Draft in the author's voice (needs a local Ollama model; see below):
+stylellm generate "a cover letter for a data analyst internship" --doc-type cover_letter
+
+# Blind A/B: styled (profile + exemplars) vs. plain, logged to artifacts/eval_log.jsonl:
+stylellm ab "a short personal statement about engineering" --doc-type personal_statement
+```
+
+Generation defaults to a local **Ollama** instruct model (`config/default.yaml`
+→ `generate.model`; pull it with `ollama pull …` and run `ollama serve`). For an
+offline dry-run of the orchestration without a model, pass `--backend fake`.
+
 All derived outputs land under `artifacts/` (git-ignored). Configuration —
-random seed, document-type map, cleaning thresholds, embedding model — lives in
-`config/default.yaml`.
+random seed, document-type map, cleaning thresholds, embedding model, chunking,
+retrieval, and generation settings — lives in `config/default.yaml`.
 
 ## Testing
 
@@ -83,12 +114,14 @@ pytest -m slow         # spaCy + full pipeline on the real corpus
 ```
 
 Property tests cover dominant-document flagging, skew-aware aggregation
-invariance, and profile JSON round-tripping.
+invariance, profile JSON round-tripping, chunk token-cap invariants (P5), and
+retrieval bound + diversity (P8).
 
 ## Layout
 
 ```
-src/stylellm/   config, models, ingest, features, style_analyzer, report, cli
+src/stylellm/   config, models, ingest, features, style_analyzer, report,
+                embeddings, index, retrieve, generate, evaluate, cli
 config/         default.yaml (config-as-code)
 tests/          unit + property/ (Hypothesis) + integration
 Dataset/        source PDFs (local, git-ignored)

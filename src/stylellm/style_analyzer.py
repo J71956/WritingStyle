@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from functools import lru_cache
 
 import numpy as np
 
 from .config import Settings
+from .embeddings import embed_texts
 from .features import extract_features
 from .models import Document, StyleProfile
 
@@ -55,21 +55,10 @@ def _mean_dicts(dicts: list[dict]) -> dict:
 
 
 # --- semantic dimension (embeddings) ----------------------------------------
-
-
-@lru_cache(maxsize=1)
-def _embedder(model_name: str):
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(model_name)
-
-
-def _embed(texts: list[str], model_name: str) -> np.ndarray | None:
-    try:
-        model = _embedder(model_name)
-    except Exception:
-        return None
-    return np.asarray(model.encode(texts, normalize_embeddings=True, show_progress_bar=False))
+#
+# Document embeddings come from the shared `embeddings.embed_texts` so the
+# analyzer, index, and query path all embed in the same space (returns None if
+# the model can't be loaded, and callers degrade gracefully).
 
 
 def _topic_clusters(embeddings: np.ndarray, k: int, seed: int) -> dict:
@@ -103,7 +92,7 @@ def analyze(documents: list[Document], settings: Settings) -> StyleProfile:
 
     # 2. Document embeddings for the semantic dimension (graceful if unavailable).
     doc_ids = [d.doc_id for d in documents]
-    emb = _embed([d.text for d in documents], model_name)
+    emb = embed_texts([d.text for d in documents], model_name)
     emb_by_id = {doc_ids[i]: emb[i] for i in range(len(doc_ids))} if emb is not None else {}
 
     # 3. Group by doc_type.

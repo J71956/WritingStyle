@@ -38,6 +38,41 @@ analyzer:
   embedding_model: sentence-transformers/all-mpnet-base-v2
   profile_version: "1.0"
 
+# --- generation half (R3-R6) ------------------------------------------------
+
+index:
+  # Paragraph-based chunking with a token cap (R3.1, spec §7): pack whole
+  # paragraphs up to the target; only a paragraph over the hard max is
+  # sentence-split, so chunks never split mid-sentence (P5).
+  chunk_target_tokens: 256
+  chunk_max_tokens: 512
+  # Keep aligned with analyzer.embedding_model so query and index share a space.
+  embedding_model: sentence-transformers/all-mpnet-base-v2
+  # Skip docs below analyzer.min_doc_tokens (e.g. EE.pdf's numeric appendix).
+  exclude_below_min_tokens: true
+
+retrieve:
+  # Top-k dense-cosine exemplars returned (R4.1).
+  top_k: 5
+  # MMR relevance/diversity trade-off (R4.3): 1.0 relevance, 0.0 diversity.
+  mmr_lambda: 0.5
+  # Cosine above this collapses near-duplicate exemplars (P8).
+  dedupe_threshold: 0.95
+
+generate:
+  # Local instruct model via Ollama (R5.1). Use "fake" for offline/CI runs.
+  backend: ollama
+  # Placeholder — verify a current local instruct model before use (spec §8).
+  model: llama3.1:8b-instruct-q4_K_M
+  ollama_host: http://localhost:11434
+  max_tokens: 512
+  temperature: 0.7
+
+evaluate:
+  # A/B + stylometric-similarity trials appended here (under artifacts/).
+  log_file: eval_log.jsonl
+  scale_floor: 1.0e-6
+
 # Curated filename -> doc_type map (17 files). Keys match Dataset/ filenames
 # exactly. doc_type in: personal_statement | cover_letter | academic_ia |
 # assignment | reflection | extended_essay

@@ -45,11 +45,55 @@ class AnalyzerCfg(BaseModel):
     profile_version: str = "1.0"
 
 
+class IndexCfg(BaseModel):
+    # Paragraph-based chunking with a token cap (R3.1): pack whole paragraphs up
+    # to the target; a single paragraph over the hard max is sentence-split.
+    chunk_target_tokens: int = 256
+    chunk_max_tokens: int = 512
+    # Embedding model for chunks; keep aligned with the analyzer's so query and
+    # index share a space (verify tier in spec §8).
+    embedding_model: str = "sentence-transformers/all-mpnet-base-v2"
+    # Skip documents too short to yield usable prose exemplars (e.g. EE.pdf's
+    # numeric appendix), mirroring the analyzer's min_doc_tokens gate.
+    exclude_below_min_tokens: bool = True
+
+
+class RetrieveCfg(BaseModel):
+    top_k: int = 5
+    # MMR trade-off: 1.0 = pure relevance, 0.0 = pure diversity (R4.3).
+    mmr_lambda: float = 0.5
+    # Cosine above this = near-duplicate; such chunks are collapsed (P8).
+    dedupe_threshold: float = 0.95
+
+
+class GenerateCfg(BaseModel):
+    # Local instruct model via Ollama by default (R5.1). "fake" is an offline,
+    # deterministic backend for tests / when no local model is installed.
+    backend: str = "ollama"  # ollama | fake
+    # Placeholder — verify a current local instruct model before use (spec §8).
+    model: str = "llama3.1:8b-instruct-q4_K_M"
+    ollama_host: str = "http://localhost:11434"
+    max_tokens: int = 512
+    temperature: float = 0.7
+
+
+class EvalCfg(BaseModel):
+    # A/B + stylometric-similarity trials are appended here (under artifacts/).
+    log_file: str = "eval_log.jsonl"
+    # Floor on per-feature std when standardizing the stylometric vector, so a
+    # constant feature can't produce a divide-by-zero (R6.1).
+    scale_floor: float = 1e-6
+
+
 class Settings(BaseModel):
     seed: int = 42
     paths: PathsCfg = Field(default_factory=PathsCfg)
     ingest: IngestCfg = Field(default_factory=IngestCfg)
     analyzer: AnalyzerCfg = Field(default_factory=AnalyzerCfg)
+    index: IndexCfg = Field(default_factory=IndexCfg)
+    retrieve: RetrieveCfg = Field(default_factory=RetrieveCfg)
+    generate: GenerateCfg = Field(default_factory=GenerateCfg)
+    evaluate: EvalCfg = Field(default_factory=EvalCfg)
     doc_type_map: dict[str, str] = Field(default_factory=dict)
 
     # Resolved absolute paths (repo-root-relative inputs resolved on load).
