@@ -1,3 +1,6 @@
+# Source corpus — the author's personal writing stays local, never tracked
+Dataset/
+
 # Derived artifacts — everything the pipeline produces stays local (R7.2, R7.3)
 artifacts/
 
