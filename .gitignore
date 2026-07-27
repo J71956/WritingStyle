@@ -24,3 +24,6 @@ venv/
 
 # spaCy / model caches occasionally dropped in-tree
 *.spacy
+
+# Local planning notes — kept in-tree for reference, not tracked
+TEST-AND-PAPER-PLAN.md
