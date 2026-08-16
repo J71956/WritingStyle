@@ -134,6 +134,48 @@ def test_split_system_lifts_the_instruction_for_chat_templates():
     assert _split_system(plain) == ("", plain)
 
 
+class _NoSystemTokenizer:
+    """Stub of a Gemma-style template: raises if given a system role."""
+
+    def apply_chat_template(self, messages, **kwargs):
+        if any(m["role"] == "system" for m in messages):
+            raise ValueError("System role not supported")
+        return "|".join(f"{m['role']}:{m['content']}" for m in messages)
+
+
+class _SystemOkTokenizer:
+    def apply_chat_template(self, messages, **kwargs):
+        return "|".join(f"{m['role']}:{m['content']}" for m in messages)
+
+
+def _bare_backend(tokenizer):
+    backend = HFBackend.__new__(HFBackend)  # bypass __init__: no weights in tests
+    backend.tokenizer = tokenizer
+    backend.enable_thinking = None
+    backend.merged_system = False
+    backend.model_id = "stub"
+    return backend
+
+
+def test_render_folds_system_into_user_when_template_rejects_it():
+    """Gemma has no system role — the instruction must survive, not be dropped."""
+    backend = _bare_backend(_NoSystemTokenizer())
+    rendered = backend._render(build_prompt("do X", _profile(), [], "cover_letter"))
+
+    assert "system:" not in rendered
+    assert _SYSTEM_INSTRUCTION in rendered  # folded in, not lost
+    assert "do X" in rendered
+    assert backend.merged_system is True
+
+
+def test_render_keeps_system_turn_when_supported():
+    backend = _bare_backend(_SystemOkTokenizer())
+    rendered = backend._render(build_prompt("do X", _profile(), [], "cover_letter"))
+
+    assert rendered.startswith("system:")
+    assert backend.merged_system is False
+
+
 def test_make_backend_dispatches_to_hf(monkeypatch):
     """Dispatch only — no weights are downloaded in the test suite."""
     captured = {}

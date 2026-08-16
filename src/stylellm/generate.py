@@ -189,6 +189,9 @@ class HFBackend:
         self.enable_thinking = enable_thinking
         self.last_prompt_tokens = 0
         self.last_new_tokens = 0
+        # True once _render has had to fold the system instruction into the user
+        # turn because this model's template rejects a system role (e.g. Gemma).
+        self.merged_system = False
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
         kwargs: dict = {"dtype": dtype, "device_map": device, "revision": revision}
@@ -206,9 +209,36 @@ class HFBackend:
 
     def _render(self, prompt: str) -> str:
         system, user = _split_system(prompt)
-        messages = ([{"role": "system", "content": system}] if system else []) + [
-            {"role": "user", "content": user}
-        ]
+
+        # Some families (Gemma) have no system role and their template raises on
+        # one, so fall back to folding the instruction into the user turn. The
+        # prompt content is identical either way; only the framing differs, and
+        # `merged_system` records which framing a model actually received so the
+        # paper can report it rather than implying all three were prompted alike.
+        candidates = []
+        if system:
+            candidates.append(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}]
+            )
+            candidates.append([{"role": "user", "content": f"{system}\n\n{user}"}])
+        else:
+            candidates.append([{"role": "user", "content": user}])
+
+        last_error: Exception | None = None
+        for i, messages in enumerate(candidates):
+            try:
+                rendered = self._apply_template(messages)
+            except Exception as e:  # jinja2 TemplateError isn't importable here
+                last_error = e
+                continue
+            self.merged_system = bool(system) and i > 0
+            return rendered
+
+        raise RuntimeError(
+            f"No chat-template form worked for {self.model_id!r}: {last_error}"
+        ) from last_error
+
+    def _apply_template(self, messages: list[dict]) -> str:
         kwargs: dict = {"tokenize": False, "add_generation_prompt": True}
         if self.enable_thinking is not None:
             # Only some templates accept this; fall back cleanly when they don't.

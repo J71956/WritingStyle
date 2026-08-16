@@ -10,9 +10,10 @@
 # you move to a bigger card, and record which you used -- quantization is a
 # reportable experimental condition, not an implementation detail.
 #
-# Two of the three are gated: accept the licence on the Hub and run
-# `hf login` before the pre-flight download, or swap in the
-# ungated fallback noted below.
+# Llama is gated: accept the licence on its Hub page and run `hf auth login`
+# before the pre-flight download. Note that repo *metadata* is readable before
+# approval while the *files* still 403 -- the only reliable access check is
+# fetching a real file, not calling model_info().
 version: 1
 
 models:
@@ -32,11 +33,16 @@ models:
     load_in_4bit: true
     gated: true
 
-  - key: mistral-7b
-    model: mistralai/Mistral-7B-Instruct-v0.3
+  # Replaces Mistral-7B-Instruct-v0.3. Gemma has no system role in its chat
+  # template, so HFBackend folds the system instruction into the user turn for
+  # this model and records it as `merged_system` -- a prompt-framing difference
+  # between models that the paper's Setup section must state, not hide.
+  - key: gemma4-e4b
+    model: google/gemma-4-E4B-it
     revision: null
     enable_thinking: null
     load_in_4bit: true
-    gated: true
-    # Ungated fallback if licence access is refused:
-    #   model: microsoft/Phi-3.5-mini-instruct
+    gated: false
+    # Larger sibling if you move to a card with more VRAM: google/gemma-4-12B-it
+    # (24 GB on disk; ~7 GB at 4-bit, which is tight on an 8 GB card once the
+    # KV cache is counted).
