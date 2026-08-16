@@ -72,7 +72,7 @@ class GenerateCfg(BaseModel):
     # backend for tests / when no local model is installed.
     backend: str = "hf"  # hf | ollama | fake
     # HF repo id (backend=hf) or Ollama tag (backend=ollama).
-    model: str = "Qwen/Qwen2.5-7B-Instruct"
+    model: str = "Qwen/Qwen3.5-9B"
     max_tokens: int = 512
     temperature: float = 0.7
 

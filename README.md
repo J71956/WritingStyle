@@ -100,12 +100,12 @@ stylellm ab "a short personal statement about engineering" --doc-type personal_s
 ```
 
 Generation defaults to a local **Hugging Face** instruct model —
-`Qwen/Qwen2.5-7B-Instruct` (`config/default.yaml` → `generate.model`). Install
+`Qwen/Qwen3.5-9B` (`config/default.yaml` → `generate.model`). Install
 the extra and pre-download the weights once:
 
 ```powershell
 pip install -e ".[hf]"
-hf download Qwen/Qwen2.5-7B-Instruct
+hf download Qwen/Qwen3.5-9B
 ```
 
 After that, set `HF_HUB_OFFLINE=1` and everything runs on-device — weights are

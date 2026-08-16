@@ -17,8 +17,8 @@
 version: 1
 
 models:
-  - key: qwen2.5-7b
-    model: Qwen/Qwen2.5-7B-Instruct
+  - key: qwen3.5-9b
+    model: Qwen/Qwen3.5-9B
     revision: null
     # Hybrid-reasoning family: suppress chain-of-thought so max_new_tokens is
     # spent on the answer. Harmless on templates that ignore the flag.
