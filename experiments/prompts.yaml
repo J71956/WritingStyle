@@ -1,0 +1,129 @@
+# Versioned prompt bank for the test campaign (§1 of TEST-AND-PAPER-PLAN.md).
+#
+# Three realistic generation requests per doc_type, 18 total. Kept in git so the
+# campaign is reproducible: `run_campaign.py` reads only this file for its
+# prompt axis, and every row in artifacts/eval/campaign.jsonl cites a prompt_id
+# from here. Do not renumber existing ids — append instead, so old result rows
+# stay interpretable.
+#
+# doc_types match config/default.yaml's doc_type_map:
+#   personal_statement | cover_letter | academic_ia | assignment | reflection |
+#   extended_essay
+version: 1
+
+prompts:
+  # --- personal_statement ---------------------------------------------------
+  - id: ps01
+    doc_type: personal_statement
+    prompt: >-
+      a personal statement for a BSc in Data Science, explaining what drew me to
+      the field and what I want to do with it
+
+  - id: ps02
+    doc_type: personal_statement
+    prompt: >-
+      a personal statement for a master's in Financial Technology, focusing on
+      the gap between my engineering coursework and my interest in markets
+
+  - id: ps03
+    doc_type: personal_statement
+    prompt: >-
+      a personal statement for a competitive undergraduate exchange programme,
+      making the case for why a year abroad matters to my studies
+
+  # --- cover_letter ---------------------------------------------------------
+  - id: cl01
+    doc_type: cover_letter
+    prompt: >-
+      a cover letter for a data-analyst internship at a fintech startup
+
+  - id: cl02
+    doc_type: cover_letter
+    prompt: >-
+      a cover letter for a graduate mechanical-engineering role at a
+      manufacturing firm, emphasising project work over grades
+
+  - id: cl03
+    doc_type: cover_letter
+    prompt: >-
+      a short cover letter for a research assistant position with a university
+      lab studying sustainable materials
+
+  # --- academic_ia ----------------------------------------------------------
+  - id: ia01
+    doc_type: academic_ia
+    prompt: >-
+      the introduction and research question of an investigation into how
+      temperature affects the rate of an enzyme-catalysed reaction
+
+  - id: ia02
+    doc_type: academic_ia
+    prompt: >-
+      the methodology section of an investigation measuring how the length of a
+      pendulum affects its period, including sources of error
+
+  - id: ia03
+    doc_type: academic_ia
+    prompt: >-
+      the analysis and evaluation section of a geography investigation into
+      urban heat islands across a city transect
+
+  # --- assignment -----------------------------------------------------------
+  - id: as01
+    doc_type: assignment
+    prompt: >-
+      an answer to a business-finance assignment question on how a firm should
+      weigh debt against equity when raising capital
+
+  - id: as02
+    doc_type: assignment
+    prompt: >-
+      a written response for an engineering assignment explaining the trade-offs
+      between two materials for a load-bearing component
+
+  - id: as03
+    doc_type: assignment
+    prompt: >-
+      an assignment answer arguing whether small firms benefit more from
+      automation than large ones, with reasoning
+
+  # --- reflection -----------------------------------------------------------
+  - id: rf01
+    doc_type: reflection
+    prompt: >-
+      a learning-journal entry reflecting on a group project where the workload
+      was distributed unevenly and what I took from it
+
+  - id: rf02
+    doc_type: reflection
+    prompt: >-
+      a reflection on a talk about AI ethics, focusing on what changed in how I
+      think about the responsibility of engineers
+
+  - id: rf03
+    doc_type: reflection
+    prompt: >-
+      a reflection on an industrial-engineering site visit and how it compared
+      with what I expected from the coursework
+
+  # --- extended_essay -------------------------------------------------------
+  # Retained as a grid cell for completeness, but see the paper's Corpus section:
+  # EE.pdf contributes no prose, so this doc_type has no exemplars to retrieve
+  # and the exemplar-bearing conditions collapse onto the profile-only ones.
+  - id: ee01
+    doc_type: extended_essay
+    prompt: >-
+      the introduction to an extended essay investigating the economic effects
+      of a minimum-wage increase on small businesses
+
+  - id: ee02
+    doc_type: extended_essay
+    prompt: >-
+      the analysis section of an extended essay evaluating competing explanations
+      for a historical event, weighing the evidence for each
+
+  - id: ee03
+    doc_type: extended_essay
+    prompt: >-
+      the conclusion of an extended essay, drawing together the argument and
+      acknowledging the limits of the investigation

@@ -21,7 +21,8 @@ This repository implements the full **v1** pipeline — analysis and generation:
 - **Retrieval (R4):** dense cosine exemplar search with `doc_type` filtering and
   MMR diversity.
 - **Generation (R5):** prompt-based drafting in the author's voice via a local
-  instruct model (Ollama), combining the style profile with retrieved exemplars.
+  instruct model (Hugging Face `transformers`, on-device), combining the style
+  profile with retrieved exemplars.
 - **Evaluation (R6):** stylometric similarity + a blind A/B harness, logged
   locally.
 
@@ -91,24 +92,54 @@ stylellm index      # -> artifacts/index/ (chunks.jsonl + embeddings.npy)
 Then generate and evaluate:
 
 ```powershell
-# Draft in the author's voice (needs a local Ollama model; see below):
+# Draft in the author's voice (needs a local model; see below):
 stylellm generate "a cover letter for a data analyst internship" --doc-type cover_letter
 
 # Blind A/B: styled (profile + exemplars) vs. plain, logged to artifacts/eval_log.jsonl:
 stylellm ab "a short personal statement about engineering" --doc-type personal_statement
 ```
 
-Generation defaults to a local **Ollama** instruct model — `qwen3.5:9b`
-(`config/default.yaml` → `generate.model`; pull it with `ollama pull qwen3.5:9b`
-and run `ollama serve`). qwen3.5 is a hybrid reasoning model, so `generate.think`
-defaults to `false` — otherwise the chain-of-thought consumes `num_predict` and
-the answer comes back empty; set it to `null` for non-reasoning models like
-`llama3.1`. For an offline dry-run of the orchestration without a model, pass
-`--backend fake`.
+Generation defaults to a local **Hugging Face** instruct model —
+`Qwen/Qwen2.5-7B-Instruct` (`config/default.yaml` → `generate.model`). Install
+the extra and pre-download the weights once:
+
+```powershell
+pip install -e ".[hf]"
+huggingface-cli download Qwen/Qwen2.5-7B-Instruct
+```
+
+After that, set `HF_HUB_OFFLINE=1` and everything runs on-device — weights are
+fetched from the Hub once, inference is local, and no hosted inference API is
+used, so no corpus text ever leaves the machine. `generate.enable_thinking`
+defaults to `false` so hybrid-reasoning models spend `max_new_tokens` on the
+answer rather than a chain-of-thought; set it to `null` for non-reasoning
+models. If a model won't fit in VRAM, set `generate.load_in_4bit: true`
+(needs `pip install -e ".[quant]"`).
+
+Two other backends are available via `--backend`: `ollama` (the original HTTP
+path — `ollama serve` plus an `ollama pull`ed tag in `generate.model`, with
+`generate.think` in place of `enable_thinking`), and `fake` for an offline
+dry-run of the orchestration with no model at all.
 
 All derived outputs land under `artifacts/` (git-ignored). Configuration —
 random seed, document-type map, cleaning thresholds, embedding model, chunking,
 retrieval, and generation settings — lives in `config/default.yaml`.
+
+## Experiments and the paper
+
+`experiments/` holds the test campaign that feeds the write-up in `paper/`:
+
+```powershell
+python experiments/run_campaign.py --backend fake --limit 8   # offline dry run
+python experiments/run_campaign.py                            # the real grid
+python experiments/run_ab_session.py --trials 20              # human blind A/B
+python experiments/analyze_results.py                         # tables + figures
+```
+
+The grid sweeps 3 models × 18 prompts × 4 ablation conditions × 3 repetitions,
+scoring every draft with the standardized stylometric metric and appending rows
+to `artifacts/eval/campaign.jsonl`. It is resumable — a re-run skips `run_id`s
+already logged. See `paper/README.md` for the LaTeX build.
 
 ## Testing
 

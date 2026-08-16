@@ -27,3 +27,7 @@ venv/
 
 # Local planning notes — kept in-tree for reference, not tracked
 TEST-AND-PAPER-PLAN.md
+
+# Generated figures (produced by experiments/analyze_results.py)
+paper/figures/*.pdf
+paper/figures/*.png

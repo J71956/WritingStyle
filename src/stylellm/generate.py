@@ -6,9 +6,12 @@ the top-k retrieved chunks as **few-shot stylistic examples**, and the user
 prompt. If retrieval is empty, generation proceeds with the profile summary
 alone (R5.4).
 
-Generation runs a **local instruct model** via Ollama's HTTP API using only the
-standard library (no new dependency, stays offline). A deterministic `fake`
-backend lets the orchestration and tests run without a model installed.
+Generation runs a **local instruct model**. The default path is Hugging Face
+`transformers` running the weights on-device (`HFBackend`); an Ollama HTTP
+backend is kept for the original workflow, and a deterministic `fake` backend
+lets the orchestration and tests run without a model installed. In every case
+inference is local — no hosted inference API, so no author text leaves the
+machine.
 
 Properties: P9 (prompt completeness).
 """
@@ -16,6 +19,7 @@ Properties: P9 (prompt completeness).
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -83,19 +87,28 @@ _SYSTEM_INSTRUCTION = (
 )
 
 
-def build_prompt(
+def assemble_prompt(
     user_prompt: str,
     profile: StyleProfile,
     exemplars: list[RetrievedChunk],
     doc_type: str | None,
+    use_profile: bool = True,
+    use_exemplars: bool = True,
 ) -> str:
-    """Assemble system instruction + style brief + few-shot exemplars + request.
+    """Assemble the prompt with the two style components independently toggled.
 
-    Always contains the style brief and the user prompt; exemplars are included
-    only when retrieval was non-empty (P9, R5.4).
+    The ablation ladder needs four combinations; `build_prompt` (both on) is the
+    production path, and the experiment harness uses the other three. With both
+    components off the result is a bare request, matching `evaluate._PLAIN_TEMPLATE`
+    in spirit: no style information reaches the model.
     """
-    parts = [_SYSTEM_INSTRUCTION, "", style_summary(profile, doc_type)]
-    if exemplars:
+    if not use_profile and not use_exemplars:
+        return f"Write the following:\n{user_prompt.strip()}"
+
+    parts = [_SYSTEM_INSTRUCTION]
+    if use_profile:
+        parts += ["", style_summary(profile, doc_type)]
+    if use_exemplars and exemplars:
         parts.append("")
         parts.append("Examples of the author's voice:")
         for i, ex in enumerate(exemplars, 1):
@@ -107,11 +120,128 @@ def build_prompt(
     return "\n".join(parts).strip()
 
 
+def build_prompt(
+    user_prompt: str,
+    profile: StyleProfile,
+    exemplars: list[RetrievedChunk],
+    doc_type: str | None,
+) -> str:
+    """Assemble system instruction + style brief + few-shot exemplars + request.
+
+    Always contains the style brief and the user prompt; exemplars are included
+    only when retrieval was non-empty (P9, R5.4).
+    """
+    return assemble_prompt(user_prompt, profile, exemplars, doc_type)
+
+
 # --- backends ---------------------------------------------------------------
 
 
 class Backend(Protocol):
     def complete(self, prompt: str, max_tokens: int, temperature: float) -> str: ...
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_OPEN_THINK_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
+
+
+def strip_reasoning(text: str) -> str:
+    """Remove a reasoning model's <think>…</think> span from decoded output.
+
+    Hybrid-reasoning models emit chain-of-thought inline. Scoring it as prose
+    would corrupt the stylometric vector, so it is cut before the text is
+    returned. An unclosed span (generation stopped mid-thought) leaves no usable
+    answer, so it is dropped entirely and surfaces as an empty draft.
+    """
+    text = _THINK_RE.sub("", text)
+    text = _OPEN_THINK_RE.sub("", text)
+    return text.strip()
+
+
+def _split_system(prompt: str) -> tuple[str, str]:
+    """Split an assembled prompt into (system turn, user turn) for chat templates."""
+    if prompt.startswith(_SYSTEM_INSTRUCTION):
+        return _SYSTEM_INSTRUCTION, prompt[len(_SYSTEM_INSTRUCTION):].strip()
+    return "", prompt  # plain condition: no system instruction to lift out
+
+
+class HFBackend:
+    """Local Hugging Face `transformers` backend (R5.1).
+
+    Weights are loaded from the local Hub cache once per instance and reused for
+    every call — reloading an 8B model per generation would dominate a campaign's
+    runtime. Set `HF_HUB_OFFLINE=1` after the first download to guarantee the
+    offline property.
+    """
+
+    def __init__(
+        self,
+        model_id: str,
+        device: str = "auto",
+        dtype: str = "auto",
+        enable_thinking: bool | None = False,
+        load_in_4bit: bool = False,
+        revision: str | None = None,
+    ):
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        self.model_id = model_id
+        self.enable_thinking = enable_thinking
+        self.last_prompt_tokens = 0
+        self.last_new_tokens = 0
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
+        kwargs: dict = {"dtype": dtype, "device_map": device, "revision": revision}
+        if load_in_4bit:
+            from transformers import BitsAndBytesConfig
+
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        self.model.eval()
+
+    @property
+    def revision(self) -> str:
+        """Resolved commit sha of the loaded weights, for the paper's setup table."""
+        return getattr(self.model.config, "_commit_hash", None) or "unknown"
+
+    def _render(self, prompt: str) -> str:
+        system, user = _split_system(prompt)
+        messages = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": "user", "content": user}
+        ]
+        kwargs: dict = {"tokenize": False, "add_generation_prompt": True}
+        if self.enable_thinking is not None:
+            # Only some templates accept this; fall back cleanly when they don't.
+            try:
+                return self.tokenizer.apply_chat_template(
+                    messages, enable_thinking=self.enable_thinking, **kwargs
+                )
+            except (TypeError, ValueError):
+                pass
+        return self.tokenizer.apply_chat_template(messages, **kwargs)
+
+    def complete(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        import torch
+
+        rendered = self._render(prompt)
+        inputs = self.tokenizer(rendered, return_tensors="pt", add_special_tokens=False)
+        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+        n_prompt = int(inputs["input_ids"].shape[-1])
+
+        with torch.no_grad():
+            out = self.model.generate(
+                **inputs,
+                do_sample=temperature > 0,
+                temperature=temperature if temperature > 0 else None,
+                max_new_tokens=max_tokens,
+                pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+            )
+        # Slice off the prompt so only the completion is decoded.
+        new_ids = out[0][n_prompt:]
+        self.last_prompt_tokens = n_prompt
+        self.last_new_tokens = int(new_ids.shape[-1])
+        text = self.tokenizer.decode(new_ids, skip_special_tokens=True)
+        return strip_reasoning(text)
 
 
 class OllamaBackend:
@@ -167,6 +297,16 @@ def make_backend(settings: Settings) -> Backend:
     backend = settings.generate.backend.lower()
     if backend == "fake":
         return FakeBackend()
+    if backend == "hf":
+        cfg = settings.generate
+        return HFBackend(
+            cfg.model,
+            device=cfg.device,
+            dtype=cfg.dtype,
+            enable_thinking=cfg.enable_thinking,
+            load_in_4bit=cfg.load_in_4bit,
+            revision=cfg.revision,
+        )
     if backend == "ollama":
         return OllamaBackend(
             settings.generate.ollama_host, settings.generate.model, settings.generate.think

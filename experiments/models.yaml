@@ -1,0 +1,37 @@
+# Model axis for the test campaign (§0 of TEST-AND-PAPER-PLAN.md).
+#
+# Three ~7-9B instruct models run locally through Hugging Face transformers.
+# `revision` should be filled in with the resolved commit sha after the
+# pre-flight download — the paper's Experimental Setup cites it, and pinning it
+# is what makes the campaign reproducible against a moving Hub repo.
+#
+# Two of the three are gated: accept the licence on the Hub and run
+# `huggingface-cli login` before the pre-flight download, or swap in the
+# ungated fallback noted below.
+version: 1
+
+models:
+  - key: qwen2.5-7b
+    model: Qwen/Qwen2.5-7B-Instruct
+    revision: null
+    # Hybrid-reasoning family: suppress chain-of-thought so max_new_tokens is
+    # spent on the answer. Harmless on templates that ignore the flag.
+    enable_thinking: false
+    load_in_4bit: false
+    gated: false
+
+  - key: llama3.1-8b
+    model: meta-llama/Llama-3.1-8B-Instruct
+    revision: null
+    enable_thinking: null  # not a reasoning model — don't pass the flag
+    load_in_4bit: false
+    gated: true
+
+  - key: mistral-7b
+    model: mistralai/Mistral-7B-Instruct-v0.3
+    revision: null
+    enable_thinking: null
+    load_in_4bit: false
+    gated: true
+    # Ungated fallback if licence access is refused:
+    #   model: microsoft/Phi-3.5-mini-instruct

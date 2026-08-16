@@ -30,6 +30,21 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.100",
     "ruff>=0.5",
+    # Experiment analysis: Wilcoxon / binomtest and the paper's figures.
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+# Local generation via Hugging Face transformers. torch already arrives
+# transitively via sentence-transformers, but it is pinned here so the CUDA
+# build is a deliberate choice rather than an incidental one.
+hf = [
+    "transformers>=4.45",
+    "accelerate>=0.30",
+    "torch>=2.2",
+]
+# Optional 4-bit quantization for models that won't fit in VRAM at full width.
+quant = [
+    "bitsandbytes>=0.43",
 ]
 
 [project.scripts]

@@ -67,18 +67,30 @@ class RetrieveCfg(BaseModel):
 
 
 class GenerateCfg(BaseModel):
-    # Local instruct model via Ollama by default (R5.1). "fake" is an offline,
-    # deterministic backend for tests / when no local model is installed.
-    backend: str = "ollama"  # ollama | fake
-    # Local instruct model pulled into Ollama (spec §8); overridable via config.
-    model: str = "qwen3.5:9b"
-    ollama_host: str = "http://localhost:11434"
+    # Local instruct model via Hugging Face transformers by default (R5.1).
+    # "ollama" is the original HTTP path; "fake" is an offline, deterministic
+    # backend for tests / when no local model is installed.
+    backend: str = "hf"  # hf | ollama | fake
+    # HF repo id (backend=hf) or Ollama tag (backend=ollama).
+    model: str = "Qwen/Qwen2.5-7B-Instruct"
     max_tokens: int = 512
     temperature: float = 0.7
-    # Reasoning ("thinking") control for hybrid models like qwen3.5. When the
-    # model reasons, its chain-of-thought fills num_predict and the `response`
-    # field comes back empty, so we disable it by default. Set to null/None for
-    # non-reasoning models (e.g. llama3.1) that reject the `think` parameter.
+
+    # --- hf backend ---------------------------------------------------------
+    # Pin a commit sha for reproducibility; None tracks the repo's main branch.
+    revision: str | None = None
+    device: str = "auto"  # passed to device_map
+    dtype: str = "auto"
+    # Suppress chain-of-thought on hybrid-reasoning models so max_new_tokens is
+    # spent on the answer. None = don't pass the flag at all.
+    enable_thinking: bool | None = False
+    # 4-bit weights (needs bitsandbytes) for models that won't fit in VRAM.
+    load_in_4bit: bool = False
+
+    # --- ollama backend -----------------------------------------------------
+    ollama_host: str = "http://localhost:11434"
+    # Ollama's equivalent of enable_thinking; null for non-reasoning models
+    # (e.g. llama3.1) that reject the `think` parameter.
     think: bool | None = False
 
 

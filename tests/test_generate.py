@@ -1,11 +1,24 @@
-"""Generator tests: prompt completeness (P9) + fake-backend orchestration."""
+"""Generator tests: prompt completeness (P9), ablation assembly, backends."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from stylellm.config import Settings
-from stylellm.generate import FakeBackend, build_prompt, generate, style_summary
+from stylellm.generate import (
+    _SYSTEM_INSTRUCTION,
+    FakeBackend,
+    HFBackend,
+    _split_system,
+    assemble_prompt,
+    build_prompt,
+    generate,
+    make_backend,
+    strip_reasoning,
+    style_summary,
+)
 from stylellm.models import Chunk, StyleProfile, content_hash
 from stylellm.retrieve import RetrievedChunk
 
@@ -35,7 +48,9 @@ def _exemplar(text: str) -> RetrievedChunk:
 
 
 def test_p9_prompt_always_has_brief_and_user_prompt():
-    prompt = build_prompt("write a cover letter", _profile(), exemplars=[], doc_type=None)
+    prompt = build_prompt(
+        "write a cover letter", _profile(), exemplars=[], doc_type=None
+    )
     assert "Style brief" in prompt
     assert "write a cover letter" in prompt
 
@@ -53,6 +68,96 @@ def test_style_summary_uses_per_type_when_available():
     s = style_summary(_profile(), "cover_letter")
     assert "cover_letter" in s
     assert "formality" in s.lower()
+
+
+# --- ablation ladder (§2 of the test plan) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "use_profile,use_exemplars,wants_brief,wants_examples",
+    [
+        (False, False, False, False),  # plain
+        (True, False, True, False),    # profile_only
+        (False, True, False, True),    # exemplars_only
+        (True, True, True, True),      # full
+    ],
+)
+def test_assemble_prompt_toggles_components_independently(
+    use_profile, use_exemplars, wants_brief, wants_examples
+):
+    prompt = assemble_prompt(
+        "write a cover letter", _profile(), [_exemplar("Dear hiring manager, ...")],
+        doc_type="cover_letter", use_profile=use_profile, use_exemplars=use_exemplars,
+    )
+    assert ("Style brief" in prompt) is wants_brief
+    assert ("Examples of the author's voice" in prompt) is wants_examples
+    # The request itself survives every condition.
+    assert "write a cover letter" in prompt
+
+
+def test_plain_condition_leaks_no_style_information():
+    """The `plain` arm must carry neither the brief, the exemplars, nor the persona."""
+    prompt = assemble_prompt(
+        "do X", _profile(), [_exemplar("Dear hiring manager, ...")],
+        doc_type="cover_letter", use_profile=False, use_exemplars=False,
+    )
+    assert "Dear hiring manager" not in prompt
+    assert "formality" not in prompt.lower()
+    assert _SYSTEM_INSTRUCTION not in prompt
+
+
+def test_build_prompt_is_the_full_condition():
+    both = assemble_prompt("do X", _profile(), [_exemplar("Sample")], "cover_letter",
+                           use_profile=True, use_exemplars=True)
+    assert build_prompt("do X", _profile(), [_exemplar("Sample")], "cover_letter") == both
+
+
+# --- hf backend --------------------------------------------------------------
+
+
+def test_strip_reasoning_removes_think_span():
+    assert strip_reasoning("<think>weighing options</think>Dear sir,") == "Dear sir,"
+    assert strip_reasoning("plain text") == "plain text"
+    # An unclosed span means generation died mid-thought — no usable answer.
+    assert strip_reasoning("<think>still going and then it stopped") == ""
+
+
+def test_split_system_lifts_the_instruction_for_chat_templates():
+    prompt = build_prompt("do X", _profile(), [], "cover_letter")
+    system, user = _split_system(prompt)
+    assert system == _SYSTEM_INSTRUCTION
+    assert "Style brief" in user and "do X" in user
+    assert _SYSTEM_INSTRUCTION not in user
+
+    # The plain condition has no system turn to lift out.
+    plain = assemble_prompt("do X", _profile(), [], None, False, False)
+    assert _split_system(plain) == ("", plain)
+
+
+def test_make_backend_dispatches_to_hf(monkeypatch):
+    """Dispatch only — no weights are downloaded in the test suite."""
+    captured = {}
+
+    def fake_init(self, model_id, **kwargs):
+        captured["model_id"] = model_id
+        captured.update(kwargs)
+
+    monkeypatch.setattr(HFBackend, "__init__", fake_init)
+    settings = Settings()
+    settings.generate.backend = "hf"
+    settings.generate.model = "Qwen/Qwen2.5-7B-Instruct"
+
+    backend = make_backend(settings)
+    assert isinstance(backend, HFBackend)
+    assert captured["model_id"] == "Qwen/Qwen2.5-7B-Instruct"
+    assert captured["enable_thinking"] is False
+
+
+def test_make_backend_rejects_unknown():
+    settings = Settings()
+    settings.generate.backend = "not-a-backend"
+    with pytest.raises(ValueError):
+        make_backend(settings)
 
 
 def test_generate_with_fake_backend_no_similarity():

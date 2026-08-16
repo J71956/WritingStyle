@@ -120,7 +120,7 @@ def generate_cmd(
     prompt: str = typer.Argument(..., help="What to write (e.g. 'a cover letter for a data analyst role')"),
     doc_type: str = typer.Option(None, "--doc-type", help="Filter exemplars to a doc_type"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="Override generation length"),
-    backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'fake' (offline)"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'hf', 'ollama', or 'fake'"),
     config: str = typer.Option(None, "--config", help="Path to config YAML"),
 ):
     """Draft text in the author's voice: profile summary + retrieved exemplars (R5)."""
@@ -155,7 +155,7 @@ def ab_cmd(
     prompt: str = typer.Argument(..., help="Prompt to run styled-vs-plain"),
     doc_type: str = typer.Option(None, "--doc-type", help="Filter exemplars to a doc_type"),
     prefer: str = typer.Option(None, "--prefer", help="Record preference non-interactively: 'A' or 'B'"),
-    backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'fake' (offline)"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'hf', 'ollama', or 'fake'"),
     config: str = typer.Option(None, "--config", help="Path to config YAML"),
 ):
     """Blind A/B trial: styled (profile + exemplars) vs. plain, logged for review (R6.2)."""
