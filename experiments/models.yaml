@@ -5,8 +5,13 @@
 # pre-flight download — the paper's Experimental Setup cites it, and pinning it
 # is what makes the campaign reproducible against a moving Hub repo.
 #
+# 4-bit is on for all three: a 7-8B model at bf16 needs ~15 GB, which does not
+# fit the 8 GB RTX 3070 Laptop this campaign runs on. Set load_in_4bit: false if
+# you move to a bigger card, and record which you used -- quantization is a
+# reportable experimental condition, not an implementation detail.
+#
 # Two of the three are gated: accept the licence on the Hub and run
-# `huggingface-cli login` before the pre-flight download, or swap in the
+# `hf login` before the pre-flight download, or swap in the
 # ungated fallback noted below.
 version: 1
 
@@ -17,21 +22,21 @@ models:
     # Hybrid-reasoning family: suppress chain-of-thought so max_new_tokens is
     # spent on the answer. Harmless on templates that ignore the flag.
     enable_thinking: false
-    load_in_4bit: false
+    load_in_4bit: true
     gated: false
 
   - key: llama3.1-8b
     model: meta-llama/Llama-3.1-8B-Instruct
     revision: null
     enable_thinking: null  # not a reasoning model — don't pass the flag
-    load_in_4bit: false
+    load_in_4bit: true
     gated: true
 
   - key: mistral-7b
     model: mistralai/Mistral-7B-Instruct-v0.3
     revision: null
     enable_thinking: null
-    load_in_4bit: false
+    load_in_4bit: true
     gated: true
     # Ungated fallback if licence access is refused:
     #   model: microsoft/Phi-3.5-mini-instruct

@@ -105,7 +105,7 @@ the extra and pre-download the weights once:
 
 ```powershell
 pip install -e ".[hf]"
-huggingface-cli download Qwen/Qwen2.5-7B-Instruct
+hf download Qwen/Qwen2.5-7B-Instruct
 ```
 
 After that, set `HF_HUB_OFFLINE=1` and everything runs on-device — weights are
