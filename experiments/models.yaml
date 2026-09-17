@@ -1,48 +1,52 @@
 # Model axis for the test campaign (§0 of TEST-AND-PAPER-PLAN.md).
 #
-# Three ~7-9B instruct models run locally through Hugging Face transformers.
-# `revision` should be filled in with the resolved commit sha after the
+# Two ~4-9B instruct models run locally through llama.cpp. The harness starts
+# one `llama-server` per model slice and stops it before the next model loads;
+# `hf_spec` is llama.cpp's `-hf` form (`<repo>:<quant>`), resolved out of the
+# same Hugging Face cache the rest of the pipeline uses.
+#
+# `revision` should be filled in with the resolved snapshot sha after the
 # pre-flight download — the paper's Experimental Setup cites it, and pinning it
-# is what makes the campaign reproducible against a moving Hub repo.
+# is what makes the campaign reproducible against a moving Hub repo. The
+# LlamaCppBackend reads the sha back off the served model path, so a run prints
+# the value to record here.
 #
-# 4-bit is on for all three: a 7-8B model at bf16 needs ~15 GB, which does not
-# fit the 8 GB RTX 3070 Laptop this campaign runs on. Set load_in_4bit: false if
-# you move to a bigger card, and record which you used -- quantization is a
-# reportable experimental condition, not an implementation detail.
+# Q4_K_M for both: a 9B model at bf16 needs ~18 GB, which does not fit the 8 GB
+# RTX 3070 Laptop this campaign runs on; the same model is ~5.7 GB at Q4_K_M.
+# Quantization is a reportable experimental condition, not an implementation
+# detail — the paper's Setup section states it.
 #
-# Llama is gated: accept the licence on its Hub page and run `hf auth login`
-# before the pre-flight download. Note that repo *metadata* is readable before
-# approval while the *files* still 403 -- the only reliable access check is
-# fetching a real file, not calling model_info().
+# `gguf_file` is checked against what llama-server actually has loaded, so a
+# stale server cannot silently mislabel a slice.
+#
+# Llama-3.1-8B was dropped from the axis: its Hub repo is gated, and a licence
+# gate in the middle of a reproducibility campaign is a dependency on someone
+# else's approval queue. Both models below are ungated and already cached. If
+# you re-add a gated model, accept the licence and run `hf auth login` first,
+# and note that repo *metadata* is readable before approval while the *files*
+# still 403 -- the only reliable access check is fetching a real file, not
+# calling model_info().
 version: 1
 
 models:
   - key: qwen3.5-9b
-    model: Qwen/Qwen3.5-9B
+    model: unsloth/Qwen3.5-9B-GGUF
+    hf_spec: unsloth/Qwen3.5-9B-GGUF:Q4_K_M
+    gguf_file: Qwen3.5-9B-Q4_K_M.gguf
     revision: null
-    # Hybrid-reasoning family: suppress chain-of-thought so max_new_tokens is
+    # Hybrid-reasoning family: suppress chain-of-thought so max_tokens is
     # spent on the answer. Harmless on templates that ignore the flag.
     enable_thinking: false
-    load_in_4bit: true
     gated: false
 
-  - key: llama3.1-8b
-    model: meta-llama/Llama-3.1-8B-Instruct
-    revision: null
-    enable_thinking: null  # not a reasoning model — don't pass the flag
-    load_in_4bit: true
-    gated: true
-
-  # Replaces Mistral-7B-Instruct-v0.3. Gemma has no system role in its chat
-  # template, so HFBackend folds the system instruction into the user turn for
+  # Gemma has no system role in its chat
+  # template, so the backend folds the system instruction into the user turn for
   # this model and records it as `merged_system` -- a prompt-framing difference
   # between models that the paper's Setup section must state, not hide.
   - key: gemma4-e4b
-    model: google/gemma-4-E4B-it
+    model: unsloth/gemma-4-E4B-it-GGUF
+    hf_spec: unsloth/gemma-4-E4B-it-GGUF:Q4_K_M
+    gguf_file: gemma-4-E4B-it-Q4_K_M.gguf
     revision: null
     enable_thinking: null
-    load_in_4bit: true
     gated: false
-    # Larger sibling if you move to a card with more VRAM: google/gemma-4-12B-it
-    # (24 GB on disk; ~7 GB at 4-bit, which is tight on an 8 GB card once the
-    # KV cache is counted).

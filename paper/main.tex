@@ -50,7 +50,7 @@ voice, under a hard constraint that no text ever leaves the author's machine.
 The system profiles a personal corpus along lexical, syntactic and pragmatic
 dimensions, retrieves diverse in-genre exemplars from a local dense index, and
 conditions a local instruct model on both. We evaluate it two ways: a
-stylometric similarity metric over \pending{648} generations spanning three
+stylometric similarity metric over \pending{432} generations spanning two
 open-weight models, six document genres and a four-rung ablation ladder; and a
 blind A/B protocol in which the author, the only person who can judge the
 target style, rates styled against unstyled drafts. Measurement also corrected
@@ -92,7 +92,7 @@ population that no individual user resembles.
   \item A stylometric similarity metric appropriate to the task, and an argument
         for why the conventional choices (BLEU, embedding cosine) measure the
         wrong thing here (\S\ref{sec:metric}).
-  \item An ablation over the two conditioning components, across three models and
+  \item An ablation over the two conditioning components, across two models and
         six genres, plus a blind human A/B (\S\ref{sec:results}).
   \item A negative measurement result about our own corpus that overturned the
         design's central assumption (\S\ref{sec:corpus}).
@@ -236,19 +236,23 @@ a design document is a hypothesis, and ingestion is the experiment that tests it
 \section{Experimental Setup}
 \label{sec:setup}
 
-\paragraph{Models.} Three open-weight instruct models in the 7--9B class, run
-locally (Table~\ref{tab:models}). Commit revisions are pinned so the campaign is
-reproducible against a moving model hub.
+\paragraph{Models.} Two open-weight instruct models in the 4--9B class, run
+locally through llama.cpp (Table~\ref{tab:models}). Both are served at
+\texttt{Q4\_K\_M} quantization rather than at full width: the 8\,GB card this
+campaign runs on cannot hold a model of this class at bf16. Quantization is
+therefore an experimental condition of every result reported here, not an
+implementation detail, and comparisons to full-width numbers elsewhere in the
+literature should be read with that in mind. Hub snapshot revisions are pinned
+so the campaign is reproducible against a moving model hub.
 
 \begin{table}[t]
 \centering\small
 \begin{tabular}{@{}lll@{}}
 \toprule
-Key & Repository & Revision \\
+Key & GGUF repository (Q4\_K\_M) & Revision \\
 \midrule
-\texttt{qwen2.5-7b}  & Qwen/Qwen2.5-7B-Instruct        & \pending \\
-\texttt{llama3.1-8b} & meta-llama/Llama-3.1-8B-Instruct & \pending \\
-\texttt{mistral-7b}  & mistralai/Mistral-7B-Instruct-v0.3 & \pending \\
+\texttt{qwen3.5-9b}  & unsloth/Qwen3.5-9B-GGUF               & \pending \\
+\texttt{gemma4-e4b}  & unsloth/gemma-4-E4B-it-GGUF           & \pending \\
 \bottomrule
 \end{tabular}
 \caption{Models. Hardware: \pending{GPU}, \pending{VRAM}.}
@@ -266,7 +270,7 @@ components: \texttt{plain} (neither), \texttt{profile\_only} (style brief),
 \paragraph{Repetitions and seeding.} Decoding samples at temperature $0.7$, so
 each cell is run three times. The sampler is seeded per repetition, making each
 (cell, repetition) individually reproducible while still exposing run-to-run
-variance --- $3 \times 18 \times 4 \times 3 = 648$ generations.
+variance --- $2 \times 18 \times 4 \times 3 = 432$ generations.
 
 \paragraph{A/B protocol.} \pending{20} prompts sampled balanced across genres.
 For each, a styled and a plain draft are generated and presented under randomised

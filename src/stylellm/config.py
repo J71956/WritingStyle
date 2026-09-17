@@ -67,14 +67,29 @@ class RetrieveCfg(BaseModel):
 
 
 class GenerateCfg(BaseModel):
-    # Local instruct model via Hugging Face transformers by default (R5.1).
-    # "ollama" is the original HTTP path; "fake" is an offline, deterministic
-    # backend for tests / when no local model is installed.
-    backend: str = "hf"  # hf | ollama | fake
-    # HF repo id (backend=hf) or Ollama tag (backend=ollama).
-    model: str = "Qwen/Qwen3.5-9B"
+    # Local quantized model via llama.cpp's llama-server by default (R5.1).
+    # "hf" runs unquantized weights through transformers; "ollama" is the
+    # original HTTP path; "fake" is an offline, deterministic backend for tests
+    # / when no local model is installed.
+    backend: str = "llamacpp"  # llamacpp | hf | ollama | fake
+    # GGUF repo id (backend=llamacpp), HF repo id (backend=hf), or Ollama tag.
+    model: str = "unsloth/Qwen3.5-9B-GGUF"
     max_tokens: int = 512
     temperature: float = 0.7
+
+    # --- llamacpp backend ---------------------------------------------------
+    llamacpp_host: str = "http://localhost:8080"
+    # GGUF filename within `model`'s repo. The backend checks this against the
+    # file llama-server actually has loaded and refuses to run on a mismatch:
+    # a campaign that sweeps models must never mislabel a row because a stale
+    # server was left running with the previous model.
+    gguf_file: str | None = "Qwen3.5-9B-Q4_K_M.gguf"
+    # Path to the llama-server executable; null looks it up on PATH. Only the
+    # campaign harness needs this — the CLI talks to a server you started.
+    llamacpp_bin: str | None = None
+    # Offloaded layers and context window for harness-started servers.
+    n_gpu_layers: int = 99
+    ctx_size: int = 8192
 
     # --- hf backend ---------------------------------------------------------
     # Pin a commit sha for reproducibility; None tracks the repo's main branch.

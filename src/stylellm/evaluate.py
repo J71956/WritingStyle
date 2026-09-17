@@ -27,7 +27,7 @@ import numpy as np
 from .config import Settings
 from .features import VECTOR_KEYS, extract_features, feature_vector
 from .index import StyleIndex
-from .models import ABTrial, Document, GenerationResult, StyleProfile
+from .models import ABTrial, Document, GenerationResult, RewriteResult, StyleProfile
 from .retrieve import retrieve
 
 
@@ -178,5 +178,22 @@ def log_generation(result: GenerationResult, prompt: str, doc_type: str | None, 
     """Append a single generation's outcome to the eval log (R6.4)."""
     append_log(
         {"type": "generation", "prompt": prompt, "doc_type": doc_type, **result.model_dump()},
+        settings,
+    )
+
+
+def log_rewrite(result: RewriteResult, doc_type: str | None, settings: Settings) -> None:
+    """Append a single rewrite's outcome to the eval log (R6.4).
+
+    `style_delta` is stored rather than recomputed at read time, so the log is
+    self-describing when it is read back months later.
+    """
+    append_log(
+        {
+            "type": "rewrite",
+            "doc_type": doc_type,
+            "style_delta": result.style_delta,
+            **result.model_dump(),
+        },
         settings,
     )

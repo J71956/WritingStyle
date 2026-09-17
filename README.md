@@ -21,8 +21,9 @@ This repository implements the full **v1** pipeline — analysis and generation:
 - **Retrieval (R4):** dense cosine exemplar search with `doc_type` filtering and
   MMR diversity.
 - **Generation (R5):** prompt-based drafting in the author's voice via a local
-  instruct model (Hugging Face `transformers`, on-device), combining the style
-  profile with retrieved exemplars.
+  instruct model (llama.cpp, on-device), combining the style profile with
+  retrieved exemplars — either writing from a request (`generate`) or restyling
+  an existing draft in place (`rewrite`, R5.5).
 - **Evaluation (R6):** stylometric similarity + a blind A/B harness, logged
   locally.
 
@@ -95,31 +96,54 @@ Then generate and evaluate:
 # Draft in the author's voice (needs a local model; see below):
 stylellm generate "a cover letter for a data analyst internship" --doc-type cover_letter
 
+# Restyle a draft you already wrote, keeping its content:
+stylellm rewrite --file draft.txt --doc-type cover_letter --out styled.txt
+
 # Blind A/B: styled (profile + exemplars) vs. plain, logged to artifacts/eval_log.jsonl:
 stylellm ab "a short personal statement about engineering" --doc-type personal_statement
 ```
 
-Generation defaults to a local **Hugging Face** instruct model —
-`Qwen/Qwen3.5-9B` (`config/default.yaml` → `generate.model`). Install
-the extra and pre-download the weights once:
+`generate` invents content in your voice; `rewrite` takes your draft as fixed
+and moves only the voice. Rewrite reports three numbers: the style similarity
+before and after (so you can see whether it actually moved toward your voice),
+**retention** — how much of the draft's vocabulary survived — and **expansion** —
+how much longer the result is in content words. The two content numbers are
+one-sided guards that only work as a pair: retention catches a rewrite that
+dropped your substance, expansion catches one that padded it with invention,
+which retention cannot see. Neither checks facts; read the output.
+
+Short drafts provoke invention badly — a one-line note reliably comes back as a
+fully structured document with details you never wrote. Give it a few sentences
+at least, and treat a warning as a reason to re-read rather than a veto.
+
+Generation defaults to a local **llama.cpp** server holding a quantized GGUF —
+`unsloth/Qwen3.5-9B-GGUF` at `Q4_K_M` (`config/default.yaml` → `generate.model`).
+At ~5.7 GB it fits an 8 GB card that cannot hold the same model at bf16.
+Pre-download the weights once, then start the server and leave it running:
 
 ```powershell
-pip install -e ".[hf]"
-hf download Qwen/Qwen3.5-9B
+hf download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-Q4_K_M.gguf
+llama-server -hf unsloth/Qwen3.5-9B-GGUF:Q4_K_M --no-mmproj --port 8080 -ngl 99 -c 8192
 ```
 
-After that, set `HF_HUB_OFFLINE=1` and everything runs on-device — weights are
-fetched from the Hub once, inference is local, and no hosted inference API is
-used, so no corpus text ever leaves the machine. `generate.enable_thinking`
-defaults to `false` so hybrid-reasoning models spend `max_new_tokens` on the
-answer rather than a chain-of-thought; set it to `null` for non-reasoning
-models. If a model won't fit in VRAM, set `generate.load_in_4bit: true`
-(needs `pip install -e ".[quant]"`).
+`stylellm generate` then talks to it over localhost. It checks which GGUF the
+server actually has loaded and refuses to run on a mismatch, so a server left
+over from another model cannot silently mislabel a result. Set
+`generate.gguf_file: null` to accept whatever is being served.
 
-Two other backends are available via `--backend`: `ollama` (the original HTTP
-path — `ollama serve` plus an `ollama pull`ed tag in `generate.model`, with
-`generate.think` in place of `enable_thinking`), and `fake` for an offline
-dry-run of the orchestration with no model at all.
+Set `HF_HUB_OFFLINE=1` after the download and everything runs on-device — the
+GGUF is fetched from the Hub once, inference is a local process bound to
+localhost, and no hosted inference API is used, so no corpus text ever leaves
+the machine. `generate.enable_thinking` defaults to `false` so
+hybrid-reasoning models spend `max_tokens` on the answer rather than a
+chain-of-thought; set it to `null` for non-reasoning models.
+
+Three other backends are available via `--backend`: `hf` (unquantized weights
+in-process via `transformers` — `pip install -e ".[hf]"`, plus
+`generate.load_in_4bit: true` and `".[quant]"` if they won't fit VRAM),
+`ollama` (the original HTTP path — `ollama serve` plus an `ollama pull`ed tag
+in `generate.model`, with `generate.think` in place of `enable_thinking`), and
+`fake` for an offline dry-run of the orchestration with no model at all.
 
 All derived outputs land under `artifacts/` (git-ignored). Configuration —
 random seed, document-type map, cleaning thresholds, embedding model, chunking,
@@ -136,7 +160,12 @@ python experiments/run_ab_session.py --trials 20              # human blind A/B
 python experiments/analyze_results.py                         # tables + figures
 ```
 
-The grid sweeps 3 models × 18 prompts × 4 ablation conditions × 3 repetitions,
+Unlike the CLI, the campaign starts and stops its own `llama-server` — one per
+model slice, since a server holds a single GGUF — so port 8080 must be free
+when it runs. Point `generate.llamacpp_bin` at the executable if it isn't on
+PATH.
+
+The grid sweeps 2 models × 18 prompts × 4 ablation conditions × 3 repetitions,
 scoring every draft with the standardized stylometric metric and appending rows
 to `artifacts/eval/campaign.jsonl`. It is resumable — a re-run skips `run_id`s
 already logged. See `paper/README.md` for the LaTeX build.

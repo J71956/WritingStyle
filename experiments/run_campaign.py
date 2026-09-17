@@ -114,21 +114,50 @@ def completed_run_ids(out_path: Path) -> set[str]:
 
 
 def make_backend_for(model_spec: dict, settings, backend_override: str | None):
-    """Build the backend for one model slice, honouring an offline override."""
+    """Build the backend for one model slice, honouring an offline override.
+
+    For the llamacpp default the harness owns the server process: one
+    llama-server per model slice, started here and stopped by `_release`. It is
+    attached to the backend as `_server` so the slice's cleanup path is the same
+    shape as unloading HF weights.
+    """
     if backend_override in ("fake", "ollama"):
         settings.generate.backend = backend_override
         if backend_override == "ollama":
             settings.generate.model = model_spec["model"]
         return gen.make_backend(settings)
 
-    return gen.HFBackend(
-        model_spec["model"],
-        device=settings.generate.device,
-        dtype=settings.generate.dtype,
-        enable_thinking=model_spec.get("enable_thinking", False),
-        load_in_4bit=model_spec.get("load_in_4bit", False),
-        revision=model_spec.get("revision"),
-    )
+    if backend_override == "hf":
+        return gen.HFBackend(
+            model_spec["model"],
+            device=settings.generate.device,
+            dtype=settings.generate.dtype,
+            enable_thinking=model_spec.get("enable_thinking", False),
+            load_in_4bit=model_spec.get("load_in_4bit", False),
+            revision=model_spec.get("revision"),
+        )
+
+    from stylellm.serve import LlamaServer
+
+    cfg = settings.generate
+    server = LlamaServer(
+        model_spec["hf_spec"],
+        port=int(cfg.llamacpp_host.rsplit(":", 1)[-1]),
+        n_gpu_layers=cfg.n_gpu_layers,
+        ctx_size=cfg.ctx_size,
+        binary=cfg.llamacpp_bin,
+    ).start()
+    try:
+        backend = gen.LlamaCppBackend(
+            server.host,
+            gguf_file=model_spec.get("gguf_file"),
+            enable_thinking=model_spec.get("enable_thinking", False),
+        )
+    except Exception:
+        server.stop()  # don't strand the process if the identity check fails
+        raise
+    backend._server = server
+    return backend
 
 
 def main() -> int:
@@ -138,8 +167,9 @@ def main() -> int:
     ap.add_argument("--config", default=None, help="Path to config YAML")
     ap.add_argument("--prompts", default=str(EXPERIMENTS_DIR / "prompts.yaml"))
     ap.add_argument("--models", default=str(EXPERIMENTS_DIR / "models.yaml"))
-    ap.add_argument("--backend", default=None, choices=["fake", "ollama", "hf"],
-                    help="Override the backend (use 'fake' for an offline dry run)")
+    ap.add_argument("--backend", default=None, choices=["fake", "ollama", "hf", "llamacpp"],
+                    help="Override the backend (use 'fake' for an offline dry run); "
+                         "default llamacpp starts a llama-server per model slice")
     ap.add_argument("--model-key", action="append", default=None,
                     help="Restrict to these model keys (repeatable)")
     ap.add_argument("--reps", type=int, default=3, help="Repetitions per cell")
@@ -213,7 +243,7 @@ def main() -> int:
             exemplars = exemplar_cache[pid]
 
             seed = settings.seed + rep
-            _set_generation_seed(seed, args.backend)
+            _set_generation_seed(seed, args.backend, backend)
             prompt_text = gen.assemble_prompt(
                 text_req, profile, exemplars, doc_type, **CONDITIONS[condition]
             )
@@ -275,6 +305,7 @@ def main() -> int:
 
             if args.limit and n_run >= args.limit:
                 print(f"\nStopping at --limit {args.limit}.")
+                _release(backend)  # never strand a llama-server on the way out
                 return 0
 
         _release(backend)
@@ -283,10 +314,15 @@ def main() -> int:
     return 0
 
 
-def _set_generation_seed(seed: int, backend_override: str | None) -> None:
+def _set_generation_seed(seed: int, backend_override: str | None, backend=None) -> None:
     """Pin the sampler before each generation (the reproducibility claim, P10)."""
     if backend_override == "fake":
         return  # deterministic already; avoids importing transformers offline
+    if backend is not None and hasattr(backend, "seed"):
+        # llama.cpp samples in the server process, out of reach of set_seed —
+        # the seed rides along with each request instead.
+        backend.seed = seed
+        return
     try:
         from transformers import set_seed
 
@@ -297,6 +333,10 @@ def _set_generation_seed(seed: int, backend_override: str | None) -> None:
 
 def _release(backend) -> None:
     """Free GPU memory before loading the next model."""
+    server = getattr(backend, "_server", None)
+    if server is not None:
+        server.stop()  # the weights live in that process, not this one
+        return
     if not hasattr(backend, "model"):
         return
     try:

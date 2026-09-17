@@ -60,13 +60,15 @@ retrieve:
   dedupe_threshold: 0.95
 
 generate:
-  # Local instruct model via Hugging Face transformers (R5.1), run on-device —
-  # no hosted inference, so no author text leaves the machine. Use "fake" for
-  # offline/CI runs, "ollama" for the original HTTP path.
-  backend: hf
-  # HF repo id. Weights are pulled once into the Hub cache; set HF_HUB_OFFLINE=1
-  # afterwards to guarantee the offline property.
-  model: Qwen/Qwen3.5-9B
+  # Local quantized model via llama.cpp's llama-server (R5.1) — no hosted
+  # inference, so no author text leaves the machine. Use "hf" for unquantized
+  # transformers in-process, "fake" for offline/CI runs, "ollama" for the
+  # original HTTP path.
+  backend: llamacpp
+  # GGUF repo id. Weights are pulled once into the Hub cache; set
+  # HF_HUB_OFFLINE=1 afterwards to guarantee the offline property. For
+  # backend: hf use the unquantized repo instead (unsloth/Qwen3.5-9B).
+  model: unsloth/Qwen3.5-9B-GGUF
   # Pin a commit sha for byte-reproducible runs (recorded in the paper's setup).
   revision: null
   device: auto
@@ -78,6 +80,12 @@ generate:
   load_in_4bit: false
   max_tokens: 512
   temperature: 0.7
+  # --- llamacpp backend only ---
+  llamacpp_host: http://localhost:8080
+  # Checked against the file llama-server actually has loaded; a mismatch is an
+  # error, so a stale server can't silently mislabel a campaign row. Set to null
+  # to accept whatever the server is serving.
+  gguf_file: Qwen3.5-9B-Q4_K_M.gguf
   # --- ollama backend only ---
   ollama_host: http://localhost:11434
   think: false
