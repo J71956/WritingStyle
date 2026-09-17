@@ -1,0 +1,415 @@
+% Personal Style LLM — systems / case-study paper (ACL format).
+%
+% Compiles two ways (see paper/README.md):
+%   * With the ACL Rolling Review template: drop acl.sty + acl_natbib.bst into
+%     this directory (or use the Overleaf template) and it builds in ACL style.
+%   * Without it: falls back to a plain two-column article so the draft always
+%     compiles. The fallback is NOT camera-ready format.
+%
+% Numbers not yet measured are wrapped in \pending{} so an unfilled draft is
+% visibly unfinished rather than quietly wrong. Every \pending must be replaced
+% by a value traceable to a row under artifacts/eval/ before submission.
+
+\IfFileExists{acl.sty}{%
+  \documentclass[11pt]{article}
+  \usepackage[review]{acl}
+}{%
+  \documentclass[11pt,twocolumn]{article}
+  \usepackage[margin=2.5cm]{geometry}
+  \usepackage{natbib}
+  \bibliographystyle{plainnat}
+  \PassOptionsToPackage{hyphens}{url}
+  \usepackage{hyperref}
+}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+
+% Visibly-unfilled result placeholder.
+\newcommand{\pending}[1][??]{\textcolor{red}{\textbf{#1}}}
+
+\title{Writing in One Person's Voice: A Case Study in Local,\\
+       Retrieval-Conditioned Personal Style Generation}
+
+\author{Shiloh Siu \\
+  \texttt{y.shing@tranxfer.com} \\}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We report a case study in generating text in a single author's personal writing
+voice, under a hard constraint that no text ever leaves the author's machine.
+The system profiles a personal corpus along lexical, syntactic and pragmatic
+dimensions, retrieves diverse in-genre exemplars from a local dense index, and
+conditions a local instruct model on both. We evaluate it two ways: a
+stylometric similarity metric over \pending{432} generations spanning two
+open-weight models, six document genres and a four-rung ablation ladder; and a
+blind A/B protocol in which the author, the only person who can judge the
+target style, rates styled against unstyled drafts. Measurement also corrected
+the project's own premise: the corpus the system was designed around is
+\emph{smaller} than assumed, because the document projected to dominate it
+turned out to contribute no extractable prose. We report the ablation result
+(\pending), the human preference rate (\pending\%, $n=\pending{20}$), and what a
+proxy stylometric metric can and cannot establish at $n{=}1$ author.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Large instruct models write competent generic prose. They do not, by default,
+write like any particular person. For an individual who wants drafting help with
+the documents they actually produce --- personal statements, cover letters,
+coursework, reflective journals --- the gap that matters is not fluency but
+voice.
+
+Closing that gap with fine-tuning is the obvious move and, for a single author,
+the wrong first one: the corpus is small enough that fine-tuning risks
+memorisation rather than abstraction, and the compute and data-handling
+requirements sit badly with the privacy constraint that motivates the project.
+This paper instead asks how far \emph{prompt-time conditioning} gets, and
+measures it.
+
+The setting is deliberately narrow. One author, one corpus of 17 personal
+documents, everything on one machine. That narrowness is the point of a case
+study: it lets us report what actually happened, including the parts that
+contradicted the design assumptions, rather than an averaged result over a
+population that no individual user resembles.
+
+\paragraph{Contributions.}
+\begin{enumerate}\itemsep0pt
+  \item A local, offline pipeline for personal-style generation: skew-aware
+        style profiling, dense retrieval with MMR diversity, and prompt
+        orchestration over an on-device open-weight model
+        (\S\ref{sec:system}).
+  \item A stylometric similarity metric appropriate to the task, and an argument
+        for why the conventional choices (BLEU, embedding cosine) measure the
+        wrong thing here (\S\ref{sec:metric}).
+  \item An ablation over the two conditioning components, across two models and
+        six genres, plus a blind human A/B (\S\ref{sec:results}).
+  \item A negative measurement result about our own corpus that overturned the
+        design's central assumption (\S\ref{sec:corpus}).
+\end{enumerate}
+
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Stylometry and authorship.}
+Quantifying authorial style through function words, sentence-length
+distributions and part-of-speech patterns is long-established in authorship
+attribution. We borrow its feature vocabulary, but invert the task: attribution
+asks whether a text matches an author, while we ask a generator to move toward
+that match.
+
+\paragraph{Controllable and style-conditioned generation.}
+Prior work conditions generation on style through fine-tuning, control codes, or
+in-context exemplars. The single-author, small-corpus regime pushes toward
+in-context methods for the reasons given in \S\ref{sec:intro}.
+
+\paragraph{Retrieval-augmented generation.}
+RAG is normally used to supply \emph{facts}. Here retrieval supplies \emph{form}:
+the retrieved chunks are not evidence to be reproduced but demonstrations of how
+the author writes. This changes what good retrieval means --- diversity of
+rhetorical register matters more than topical precision, which is why selection
+uses MMR (\S\ref{sec:retrieval}).
+
+\paragraph{Why not BLEU or embedding cosine.}
+$n$-gram overlap with the author's existing documents rewards a generator for
+copying them, which is the failure mode we most want to avoid. Sentence-embedding
+cosine is dominated by topic: a cover letter and a physics investigation by the
+same author are far apart in embedding space despite sharing a voice. Both
+metrics would report progress on something other than style
+(\S\ref{sec:metric}).
+
+\section{System}
+\label{sec:system}
+
+\begin{figure}[t]
+\centering
+\small
+\texttt{PDFs} $\rightarrow$ \texttt{ingest} $\rightarrow$ \texttt{style profile} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{chunk + embed} $\rightarrow$ \texttt{dense index} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{retrieve (MMR)} $\rightarrow$ \texttt{prompt assembly} $\rightarrow$ \texttt{local LLM} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{stylometric score} \;/\; \texttt{blind A/B}
+\caption{Pipeline. Every stage runs on the author's machine; model weights are
+fetched once and inference is on-device.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Ingestion and skew-aware profiling}
+\label{sec:profiling}
+
+Documents are extracted from PDF, stripped of running headers, footers,
+bibliographies and non-prose lines, tagged with a genre label, and screened by a
+soft PII pass. Style features are then computed along four dimensions: lexical
+(type-token ratio, MTLD), syntactic (mean sentence length, POS distribution),
+pragmatic (formality, reading grade, rhetorical markers) and semantic
+(topic clusters, embedding centroid).
+
+The profile is computed \emph{per genre and then averaged across genres} rather
+than pooled over the corpus. This was a defensive choice: the corpus was
+projected to be dominated by one very long document, and pooling would have let
+that document's register stand in for the author's. \S\ref{sec:corpus} reports
+what measurement did to that assumption.
+
+\subsection{Retrieval}
+\label{sec:retrieval}
+
+Chunks are paragraph-packed to a token target, never split mid-sentence, and
+embedded with a sentence-transformer model. Retrieval is brute-force cosine over
+the flat index --- justified at this corpus size --- with an optional genre
+filter, near-duplicate collapsing, and MMR selection so the top-$k$ exemplars
+demonstrate a range of the author's constructions rather than five near-copies of
+one paragraph. No BM25 and no cross-encoder reranker: neither is defensible at a
+few dozen chunks.
+
+\subsection{Prompt orchestration}
+\label{sec:prompting}
+
+The assembled prompt carries a system instruction, a natural-language
+\emph{style brief} rendered from the profile, the retrieved exemplars labelled as
+models of tone rather than content, and the request. The two conditioning
+components are independently switchable, which is exactly what the ablation in
+\S\ref{sec:setup} varies.
+
+Generation runs locally through Hugging Face \texttt{transformers}: weights are
+downloaded once from the Hub, after which runs execute with the hub client in
+offline mode. Chain-of-thought is suppressed on hybrid-reasoning models, and any
+residual reasoning span is stripped before scoring --- left in, it would corrupt
+the stylometric vector with text the author never intended as prose.
+
+\subsection{The stylometric similarity metric}
+\label{sec:metric}
+
+A draft is scored by extracting the same feature vector used for profiling and
+measuring its distance to the author's target vector for that genre. Features
+differ in natural magnitude by orders of magnitude, so each is standardised by
+its per-feature standard deviation across the corpus before the Euclidean
+distance is taken; the distance $d$ is mapped to a similarity by $1/(1+d)$.
+
+We stress that this is a \emph{proxy}. It measures whether a draft occupies the
+author's region of stylometric feature space. A text can do that while reading
+as obviously machine-written, and the metric would not notice. It is used here
+because it scales to hundreds of generations and is sensitive to the right
+\emph{kind} of difference; the human A/B is what tests whether the result is
+actually convincing.
+
+\section{Corpus}
+\label{sec:corpus}
+
+The corpus is 17 PDF documents written by the author across six genres:
+personal statements, cover letters, academic investigations, coursework
+assignments, reflective journals, and one extended essay.
+
+\paragraph{A premise overturned by measurement.}
+The system was designed around a projected corpus of roughly 93{,}900 words in
+which a single 395-page extended essay accounted for about 69\% of the total ---
+a skew severe enough to justify the per-genre weighting in
+\S\ref{sec:profiling}. Ingestion showed this to be wrong. The extended essay's
+PDF text layer contains only its numeric data appendix; the essay prose itself is
+not extractable from the file. After the minimum-token screen the document
+contributes nothing to either the profile or the index.
+
+The real corpus is therefore \pending{16} usable documents yielding \pending{56}
+chunks --- roughly a fifth of the projected size. Two consequences follow, and we
+report both rather than quietly re-scoping. First, the skew-aware design is
+largely moot: with the dominant document absent, per-genre averaging and naive
+pooling are much closer than anticipated, so the defensive choice cost little but
+bought little. Second, the \texttt{extended\_essay} genre has no exemplars at
+all, so its exemplar-bearing ablation conditions collapse onto the
+profile-only ones. Results for that genre are reported separately and should not
+be read as a retrieval result.
+
+The general lesson is unremarkable but easy to skip: a corpus assumption stated in
+a design document is a hypothesis, and ingestion is the experiment that tests it.
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\paragraph{Models.} Two open-weight instruct models in the 4--9B class, run
+locally through llama.cpp (Table~\ref{tab:models}). Both are served at
+\texttt{Q4\_K\_M} quantization rather than at full width: the 8\,GB card this
+campaign runs on cannot hold a model of this class at bf16. Quantization is
+therefore an experimental condition of every result reported here, not an
+implementation detail, and comparisons to full-width numbers elsewhere in the
+literature should be read with that in mind. Hub snapshot revisions are pinned
+so the campaign is reproducible against a moving model hub.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Key & GGUF repository (Q4\_K\_M) & Revision \\
+\midrule
+\texttt{qwen3.5-9b}  & unsloth/Qwen3.5-9B-GGUF               & \pending \\
+\texttt{gemma4-e4b}  & unsloth/gemma-4-E4B-it-GGUF           & \pending \\
+\bottomrule
+\end{tabular}
+\caption{Models. Hardware: \pending{GPU}, \pending{VRAM}.}
+\label{tab:models}
+\end{table}
+
+\paragraph{Prompt bank.} 18 fixed generation requests, three per genre, written
+as realistic requests in that genre and versioned in the repository so results
+remain interpretable.
+
+\paragraph{Ablation ladder.} Four conditions crossing the two conditioning
+components: \texttt{plain} (neither), \texttt{profile\_only} (style brief),
+\texttt{exemplars\_only} (retrieved exemplars), \texttt{full} (both).
+
+\paragraph{Repetitions and seeding.} Decoding samples at temperature $0.7$, so
+each cell is run three times. The sampler is seeded per repetition, making each
+(cell, repetition) individually reproducible while still exposing run-to-run
+variance --- $2 \times 18 \times 4 \times 3 = 432$ generations.
+
+\paragraph{A/B protocol.} \pending{20} prompts sampled balanced across genres.
+For each, a styled and a plain draft are generated and presented under randomised
+blind labels; the author records which reads more like their own writing. The
+author is the only available rater --- the target style is theirs --- and this is
+a real limitation, treated as such in \S\ref{sec:limitations}.
+
+\section{Results}
+\label{sec:results}
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Condition & $n$ & Mean sim. & SD \\
+\midrule
+\texttt{plain}          & \pending & \pending & \pending \\
+\texttt{profile\_only}   & \pending & \pending & \pending \\
+\texttt{exemplars\_only} & \pending & \pending & \pending \\
+\texttt{full}           & \pending & \pending & \pending \\
+\bottomrule
+\end{tabular}
+\caption{Ablation ladder, pooled over models and genres. Source:
+\texttt{artifacts/eval/table\_by\_condition.csv}.}
+\label{tab:ablation}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_ablation.pdf}
+\caption{Mean stylometric similarity per condition, grouped by model. Error bars
+are one standard deviation.}
+\label{fig:ablation}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_by_doc_type.pdf}
+\caption{The same ladder broken out by genre.}
+\label{fig:bydoctype}
+\end{figure}
+
+\paragraph{Ablation.} \pending{Describe which rungs separate.} Conditions are
+compared pairwise against \texttt{full} with a Wilcoxon signed-rank test, paired
+by (model, prompt, repetition) so the only difference within a pair is what the
+prompt carried; the test is used in place of a $t$-test because the differences
+are small-sample and not plausibly normal. Source:
+\texttt{artifacts/eval/ablation\_tests.csv}.
+
+\paragraph{Models and genres.} \pending{Per-model and per-genre findings.}
+
+\paragraph{Human A/B.} The styled arm was preferred in \pending{}/\pending{20}
+trials (\pending\%, 95\% Wilson CI [\pending, \pending], binomial $p =
+\pending$ against a 0.5 null). \pending{Interpretation.}
+
+\paragraph{Latency.} \pending{Mean latency and tokens/s per model.}
+
+\section{Discussion}
+\label{sec:discussion}
+
+\pending{To be written from the measured results.} The questions the design
+poses, and which the results should answer, are: whether the style brief and the
+retrieved exemplars contribute independently or redundantly; whether either
+component helps more in genres with strong conventional form (cover letters) than
+in genres where the author's voice carries more of the work (reflections); and
+whether the automated metric and the human preference agree --- a disagreement
+would be the more informative outcome, since it would bound what the proxy can be
+trusted to say.
+
+\section{Limitations}
+\label{sec:limitations}
+
+\paragraph{One author.} Every result is about one person's writing. Nothing here
+establishes that the approach generalises, and the corpus-size finding in
+\S\ref{sec:corpus} suggests personal corpora vary in ways that matter.
+
+\paragraph{One rater, who is also the author of the system.} The A/B judgments
+come from the same person who built the pipeline and whose style is the target.
+Only that person can judge the target, but they are not blind to the study's
+purpose, and at $n \approx 20$ the confidence interval is wide. The preference
+rate should be read as evidence about direction, not magnitude.
+
+\paragraph{A proxy metric.} The stylometric similarity measures position in
+feature space, not whether prose is convincing. It cannot detect a draft that is
+stylometrically on-target and obviously synthetic.
+
+\paragraph{Small corpus.} \pending{16} documents and \pending{56} chunks. The
+per-genre profile for thinly represented genres rests on very few documents, and
+one genre has no usable prose at all.
+
+\paragraph{Stochastic decoding.} Seeding makes each run reproducible but does not
+remove sampling variance; three repetitions bound it only loosely.
+
+\paragraph{No fine-tuning baseline.} The paper measures how far prompt-time
+conditioning gets, without establishing what fine-tuning would add. That
+comparison is the natural next study, not a result reported here.
+
+\section{Ethics and Privacy}
+\label{sec:ethics}
+
+The corpus is one person's personal writing, including university applications.
+It is used with that person's consent --- they are the author of both the corpus
+and this paper --- and it is never transmitted: ingestion, indexing, retrieval,
+generation and scoring all run on one machine, model weights are fetched once
+from the model hub and inference is on-device, and no hosted inference API is
+used at any point. The source corpus and all derived artefacts are excluded from
+version control. A soft PII pass flags obvious emails and phone numbers during
+ingestion; it is a convenience, not a safety guarantee, and is not relied on as
+one.
+
+A system that writes convincingly in a named person's voice is dual-use. The
+mitigation here is structural rather than technical: it runs locally, on a
+corpus its own subject supplies, with no capability to acquire someone else's
+writing.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\pending{To be written once the A/B bar is measured.} The decision this study
+exists to inform is whether prompt-time conditioning is sufficient, or whether a
+second version should invest in fine-tuning or hybrid retrieval. That decision
+should follow from the measured preference rate and its interval, not from the
+proxy metric alone.
+
+\bibliography{references}
+
+\appendix
+
+\section{Prompt Bank}
+\label{app:prompts}
+The 18 requests are listed in \texttt{experiments/prompts.yaml}.
+
+\section{Full Result Tables}
+\label{app:tables}
+Per-model, per-genre and per-condition tables are generated into
+\texttt{artifacts/eval/} by \texttt{experiments/analyze\_results.py}.
+
+\section{Example Generations}
+\label{app:examples}
+\pending{Selected drafts per condition.}
+
+\end{document}

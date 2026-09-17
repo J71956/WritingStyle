@@ -11,6 +11,7 @@ Commands:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -120,7 +121,7 @@ def generate_cmd(
     prompt: str = typer.Argument(..., help="What to write (e.g. 'a cover letter for a data analyst role')"),
     doc_type: str = typer.Option(None, "--doc-type", help="Filter exemplars to a doc_type"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="Override generation length"),
-    backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'fake' (offline)"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'hf', 'ollama', or 'fake'"),
     config: str = typer.Option(None, "--config", help="Path to config YAML"),
 ):
     """Draft text in the author's voice: profile summary + retrieved exemplars (R5)."""
@@ -150,12 +151,81 @@ def generate_cmd(
     console.print(result.generated_text)
 
 
+@app.command("rewrite")
+def rewrite_cmd(
+    text: str = typer.Argument(None, help="Draft to restyle (or use --file)"),
+    file: str = typer.Option(None, "--file", "-f", help="Read the draft from a file"),
+    doc_type: str = typer.Option(None, "--doc-type", help="Filter exemplars to a doc_type"),
+    out: str = typer.Option(None, "--out", "-o", help="Write the rewrite to this file"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="Override generation length"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'llamacpp', 'hf', 'ollama', or 'fake'"),
+    config: str = typer.Option(None, "--config", help="Path to config YAML"),
+):
+    """Restyle your own draft into the author's voice, keeping its content (R5.5)."""
+    from .evaluate import log_rewrite
+    from .generate import rewrite
+    from .index import load_index
+    from .retrieve import retrieve
+
+    if bool(text) == bool(file):
+        raise typer.BadParameter("Pass either a draft as an argument or --file, not both.")
+
+    source = Path(file).read_text(encoding="utf-8") if file else text
+    if not source.strip():
+        raise typer.BadParameter("The draft is empty — nothing to rewrite.")
+
+    settings = load_settings(config)
+    set_seeds(settings.seed)
+    if max_tokens:
+        settings.generate.max_tokens = max_tokens
+    if backend:
+        settings.generate.backend = backend
+
+    profile = _load_profile(settings)
+    index = load_index(settings)
+    # Retrieve against the draft itself: it is a far better query for "what does
+    # this author sound like here" than any description of it would be.
+    exemplars = retrieve(source, index, settings, doc_type=doc_type)
+    if not exemplars:
+        console.print("[yellow]No exemplars retrieved[/] - rewriting from the style profile alone.")
+
+    result = rewrite(source, profile, exemplars, settings, doc_type=doc_type)
+    log_rewrite(result, doc_type, settings)
+
+    if result.content_retention < 0.6:
+        console.print(
+            f"[red]Content check:[/] only {result.content_retention:.0%} of the draft's "
+            f"content words survived - the model may have dropped substance, "
+            f"not just restyled it. Read it carefully."
+        )
+    if result.expansion_ratio > 2.0:
+        console.print(
+            f"[red]Content check:[/] the rewrite is {result.expansion_ratio:.1f}x the "
+            f"draft's length in content words - it has almost certainly invented "
+            f"material. Short drafts provoke this; give it more to work with."
+        )
+
+    # ASCII only: this lands on a cp1252 console, which raises on arrows/dashes.
+    console.print(
+        f"\n[bold]Rewrite[/] (style {result.source_similarity:.3f} -> "
+        f"{result.style_similarity:.3f}, delta {result.style_delta:+.3f}; "
+        f"retention {result.content_retention:.0%}, "
+        f"expansion {result.expansion_ratio:.1f}x; "
+        f"{len(result.exemplars_used)} exemplar(s), {result.latency_ms} ms):\n"
+    )
+    console.print(result.rewritten_text)
+
+    if out:
+        Path(out).write_text(result.rewritten_text, encoding="utf-8")
+        console.print(f"\n[dim]Written to {out}[/]")
+
+
 @app.command("ab")
 def ab_cmd(
     prompt: str = typer.Argument(..., help="Prompt to run styled-vs-plain"),
     doc_type: str = typer.Option(None, "--doc-type", help="Filter exemplars to a doc_type"),
     prefer: str = typer.Option(None, "--prefer", help="Record preference non-interactively: 'A' or 'B'"),
-    backend: str = typer.Option(None, "--backend", help="Override backend: 'ollama' or 'fake' (offline)"),
+    backend: str = typer.Option(None, "--backend", help="Override backend: 'hf', 'ollama', or 'fake'"),
     config: str = typer.Option(None, "--config", help="Path to config YAML"),
 ):
     """Blind A/B trial: styled (profile + exemplars) vs. plain, logged for review (R6.2)."""

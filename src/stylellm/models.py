@@ -71,6 +71,38 @@ class GenerationResult(BaseModel):
     latency_ms: int
 
 
+class RewriteResult(BaseModel):
+    """Outcome of restyling an existing draft (R5.5).
+
+    Unlike generation, rewriting has a baseline: the draft already has a style.
+    `source_similarity` is that baseline and `style_similarity` the result, so
+    the pair says whether the rewrite moved the text toward the author's voice
+    or away from it — a single score could not.
+    """
+
+    rewritten_text: str
+    source_text: str
+    style_similarity: float  # rewrite vs. the profile
+    source_similarity: float  # the input draft vs. the profile
+    # Two one-sided guards that only mean something as a pair, because a rewrite
+    # can fail in both directions:
+    #   retention — share of the source's content words still present. Catches a
+    #               rewrite that dropped the draft's substance.
+    #   expansion — the rewrite's content-word count over the source's. Catches
+    #               the opposite failure, which retention is blind to: a short
+    #               draft inflated into paragraphs of invented material, where
+    #               every original word survives and retention still reads fine.
+    # Neither verifies a claim. They are smoke alarms, not a fact-check.
+    content_retention: float
+    expansion_ratio: float
+    exemplars_used: list[str] = Field(default_factory=list)
+    latency_ms: int
+
+    @property
+    def style_delta(self) -> float:
+        return self.style_similarity - self.source_similarity
+
+
 class ABTrial(BaseModel):
     trial_id: str
     prompt: str
